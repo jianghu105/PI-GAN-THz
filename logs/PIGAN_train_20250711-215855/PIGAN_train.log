@@ -1,0 +1,143 @@
+2025-07-11 21:58:55,119 - PIGAN_train - INFO - Logging to file: D:\PI_GAN_THz\logs\PIGAN_train_20250711-215855\PIGAN_train.log
+2025-07-11 21:58:55,126 - PIGAN_train - INFO - TensorBoard logs will be saved to: D:\PI_GAN_THz\logs\PIGAN_train_20250711-215855
+2025-07-11 21:58:55,127 - PIGAN_train - INFO - Starting PI_GAN_THZ Project in 'train' mode.
+2025-07-11 21:58:55,127 - PIGAN_train - INFO - Using device: cpu
+2025-07-11 21:58:55,127 - PIGAN_train - INFO - Random seed set to: 42
+2025-07-11 21:58:55,188 - PIGAN_train - INFO - Dataset size: 1000 samples
+2025-07-11 21:58:55,188 - PIGAN_train - INFO - Number of batches: 8
+2025-07-11 21:58:55,211 - PIGAN_train - INFO - 
+--- Model Architectures ---
+2025-07-11 21:58:55,213 - PIGAN_train - INFO - Generator:
+Generator(
+  (model): Sequential(
+    (0): Linear(in_features=250, out_features=1024, bias=True)
+    (1): LayerNorm((1024,), eps=1e-05, elementwise_affine=True)
+    (2): LeakyReLU(negative_slope=0.2, inplace=True)
+    (3): Linear(in_features=1024, out_features=512, bias=True)
+    (4): LayerNorm((512,), eps=1e-05, elementwise_affine=True)
+    (5): LeakyReLU(negative_slope=0.2, inplace=True)
+    (6): Linear(in_features=512, out_features=256, bias=True)
+    (7): LayerNorm((256,), eps=1e-05, elementwise_affine=True)
+    (8): LeakyReLU(negative_slope=0.2, inplace=True)
+    (9): Linear(in_features=256, out_features=128, bias=True)
+    (10): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+    (11): LeakyReLU(negative_slope=0.2, inplace=True)
+    (12): Linear(in_features=128, out_features=4, bias=True)
+    (13): Sigmoid()
+  )
+)
+2025-07-11 21:58:55,216 - PIGAN_train - INFO - Discriminator:
+Discriminator(
+  (model): Sequential(
+    (0): Linear(in_features=254, out_features=512, bias=True)
+    (1): LayerNorm((512,), eps=1e-05, elementwise_affine=True)
+    (2): LeakyReLU(negative_slope=0.2, inplace=True)
+    (3): Dropout(p=0.3, inplace=False)
+    (4): Linear(in_features=512, out_features=256, bias=True)
+    (5): LayerNorm((256,), eps=1e-05, elementwise_affine=True)
+    (6): LeakyReLU(negative_slope=0.2, inplace=True)
+    (7): Dropout(p=0.3, inplace=False)
+    (8): Linear(in_features=256, out_features=128, bias=True)
+    (9): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+    (10): LeakyReLU(negative_slope=0.2, inplace=True)
+    (11): Dropout(p=0.3, inplace=False)
+    (12): Linear(in_features=128, out_features=1, bias=True)
+    (13): Sigmoid()
+  )
+)
+2025-07-11 21:58:55,218 - PIGAN_train - INFO - ForwardModel:
+ForwardModel(
+  (model): Sequential(
+    (0): Linear(in_features=4, out_features=256, bias=True)
+    (1): LayerNorm((256,), eps=1e-05, elementwise_affine=True)
+    (2): LeakyReLU(negative_slope=0.2, inplace=True)
+    (3): Dropout(p=0.2, inplace=False)
+    (4): Linear(in_features=256, out_features=512, bias=True)
+    (5): LayerNorm((512,), eps=1e-05, elementwise_affine=True)
+    (6): LeakyReLU(negative_slope=0.2, inplace=True)
+    (7): Dropout(p=0.2, inplace=False)
+    (8): Linear(in_features=512, out_features=1024, bias=True)
+    (9): LayerNorm((1024,), eps=1e-05, elementwise_affine=True)
+    (10): LeakyReLU(negative_slope=0.2, inplace=True)
+    (11): Dropout(p=0.2, inplace=False)
+    (12): Linear(in_features=1024, out_features=512, bias=True)
+    (13): LayerNorm((512,), eps=1e-05, elementwise_affine=True)
+    (14): LeakyReLU(negative_slope=0.2, inplace=True)
+    (15): Dropout(p=0.2, inplace=False)
+    (16): Linear(in_features=512, out_features=256, bias=True)
+    (17): LayerNorm((256,), eps=1e-05, elementwise_affine=True)
+    (18): LeakyReLU(negative_slope=0.2, inplace=True)
+    (19): Dropout(p=0.2, inplace=False)
+    (20): Linear(in_features=256, out_features=258, bias=True)
+  )
+)
+2025-07-11 21:58:55,221 - PIGAN_train - INFO - 
+--- Pretraining Forward Model ---
+2025-07-11 22:00:04,366 - PIGAN_train - INFO - Pretrain Epoch [10/1000], Loss: 0.6894
+2025-07-11 22:01:21,529 - PIGAN_train - INFO - Pretrain Epoch [20/1000], Loss: 0.3094
+2025-07-11 22:02:39,578 - PIGAN_train - INFO - Pretrain Epoch [30/1000], Loss: 0.2313
+2025-07-11 22:04:09,211 - PIGAN_train - INFO - Pretrain Epoch [40/1000], Loss: 0.1846
+2025-07-11 22:05:30,947 - PIGAN_train - INFO - Pretrain Epoch [50/1000], Loss: 0.1532
+2025-07-11 22:06:52,680 - PIGAN_train - INFO - Pretrain Epoch [60/1000], Loss: 0.1375
+2025-07-11 22:08:15,581 - PIGAN_train - INFO - Pretrain Epoch [70/1000], Loss: 0.1247
+2025-07-11 22:09:49,949 - PIGAN_train - INFO - Pretrain Epoch [80/1000], Loss: 0.1196
+2025-07-11 22:11:23,751 - PIGAN_train - INFO - Pretrain Epoch [90/1000], Loss: 0.1155
+2025-07-11 22:12:45,869 - PIGAN_train - INFO - Pretrain Epoch [100/1000], Loss: 0.1110
+2025-07-11 22:14:07,386 - PIGAN_train - INFO - Pretrain Epoch [110/1000], Loss: 0.1020
+2025-07-11 22:15:31,736 - PIGAN_train - INFO - Pretrain Epoch [120/1000], Loss: 0.0980
+2025-07-11 22:16:58,877 - PIGAN_train - INFO - Pretrain Epoch [130/1000], Loss: 0.1013
+2025-07-11 22:18:35,340 - PIGAN_train - INFO - Pretrain Epoch [140/1000], Loss: 0.1000
+2025-07-11 22:20:29,151 - PIGAN_train - INFO - Pretrain Epoch [150/1000], Loss: 0.1024
+2025-07-11 22:21:52,591 - PIGAN_train - INFO - Pretrain Epoch [160/1000], Loss: 0.0930
+2025-07-11 22:23:15,588 - PIGAN_train - INFO - Pretrain Epoch [170/1000], Loss: 0.0964
+2025-07-11 22:24:37,203 - PIGAN_train - INFO - Pretrain Epoch [180/1000], Loss: 0.0856
+2025-07-11 22:25:59,893 - PIGAN_train - INFO - Pretrain Epoch [190/1000], Loss: 0.0905
+2025-07-11 22:27:22,663 - PIGAN_train - INFO - Pretrain Epoch [200/1000], Loss: 0.0859
+2025-07-11 22:28:45,968 - PIGAN_train - INFO - Pretrain Epoch [210/1000], Loss: 0.0803
+2025-07-11 22:30:07,990 - PIGAN_train - INFO - Pretrain Epoch [220/1000], Loss: 0.0858
+2025-07-11 22:31:30,354 - PIGAN_train - INFO - Pretrain Epoch [230/1000], Loss: 0.0831
+2025-07-11 22:32:52,839 - PIGAN_train - INFO - Pretrain Epoch [240/1000], Loss: 0.0791
+2025-07-11 22:34:17,475 - PIGAN_train - INFO - Pretrain Epoch [250/1000], Loss: 0.0769
+2025-07-11 22:35:42,071 - PIGAN_train - INFO - Pretrain Epoch [260/1000], Loss: 0.0789
+2025-07-11 22:37:09,397 - PIGAN_train - INFO - Pretrain Epoch [270/1000], Loss: 0.0767
+2025-07-11 22:38:43,652 - PIGAN_train - INFO - Pretrain Epoch [280/1000], Loss: 0.0762
+2025-07-11 22:40:29,227 - PIGAN_train - INFO - Pretrain Epoch [290/1000], Loss: 0.0747
+2025-07-11 22:42:17,173 - PIGAN_train - INFO - Pretrain Epoch [300/1000], Loss: 0.0714
+2025-07-11 22:43:54,035 - PIGAN_train - INFO - Pretrain Epoch [310/1000], Loss: 0.0716
+2025-07-11 22:45:40,256 - PIGAN_train - INFO - Pretrain Epoch [320/1000], Loss: 0.0690
+2025-07-11 22:47:27,259 - PIGAN_train - INFO - Pretrain Epoch [330/1000], Loss: 0.0712
+2025-07-11 22:48:58,129 - PIGAN_train - INFO - Pretrain Epoch [340/1000], Loss: 0.0670
+2025-07-11 22:50:27,701 - PIGAN_train - INFO - Pretrain Epoch [350/1000], Loss: 0.0656
+2025-07-11 22:52:08,274 - PIGAN_train - INFO - Pretrain Epoch [360/1000], Loss: 0.0710
+2025-07-11 22:53:45,961 - PIGAN_train - INFO - Pretrain Epoch [370/1000], Loss: 0.0669
+2025-07-11 22:55:45,458 - PIGAN_train - INFO - Pretrain Epoch [380/1000], Loss: 0.0655
+2025-07-11 22:58:04,458 - PIGAN_train - INFO - Pretrain Epoch [390/1000], Loss: 0.0677
+2025-07-11 23:00:32,912 - PIGAN_train - INFO - Pretrain Epoch [400/1000], Loss: 0.0632
+2025-07-11 23:02:32,221 - PIGAN_train - INFO - Pretrain Epoch [410/1000], Loss: 0.0622
+2025-07-11 23:04:41,385 - PIGAN_train - INFO - Pretrain Epoch [420/1000], Loss: 0.0635
+2025-07-11 23:07:17,786 - PIGAN_train - INFO - Pretrain Epoch [430/1000], Loss: 0.0618
+2025-07-11 23:09:49,408 - PIGAN_train - INFO - Pretrain Epoch [440/1000], Loss: 0.0641
+2025-07-11 23:11:44,566 - PIGAN_train - INFO - Pretrain Epoch [450/1000], Loss: 0.0624
+2025-07-11 23:13:46,185 - PIGAN_train - INFO - Pretrain Epoch [460/1000], Loss: 0.0629
+2025-07-11 23:15:48,732 - PIGAN_train - INFO - Pretrain Epoch [470/1000], Loss: 0.0602
+2025-07-11 23:17:42,019 - PIGAN_train - INFO - Pretrain Epoch [480/1000], Loss: 0.0606
+2025-07-11 23:20:02,259 - PIGAN_train - INFO - Pretrain Epoch [490/1000], Loss: 0.0621
+2025-07-11 23:21:42,356 - PIGAN_train - INFO - Pretrain Epoch [500/1000], Loss: 0.0609
+2025-07-11 23:23:05,306 - PIGAN_train - INFO - Pretrain Epoch [510/1000], Loss: 0.0604
+2025-07-11 23:24:31,279 - PIGAN_train - INFO - Pretrain Epoch [520/1000], Loss: 0.0623
+2025-07-11 23:26:04,331 - PIGAN_train - INFO - Pretrain Epoch [530/1000], Loss: 0.0592
+2025-07-11 23:27:38,339 - PIGAN_train - INFO - Pretrain Epoch [540/1000], Loss: 0.0609
+2025-07-11 23:29:18,922 - PIGAN_train - INFO - Pretrain Epoch [550/1000], Loss: 0.0617
+2025-07-11 23:31:19,554 - PIGAN_train - INFO - Pretrain Epoch [560/1000], Loss: 0.0583
+2025-07-11 23:33:12,400 - PIGAN_train - INFO - Pretrain Epoch [570/1000], Loss: 0.0584
+2025-07-11 23:35:10,900 - PIGAN_train - INFO - Pretrain Epoch [580/1000], Loss: 0.0623
+2025-07-11 23:37:15,916 - PIGAN_train - INFO - Pretrain Epoch [590/1000], Loss: 0.0587
+2025-07-11 23:39:32,720 - PIGAN_train - INFO - Pretrain Epoch [600/1000], Loss: 0.0624
+2025-07-11 23:41:41,526 - PIGAN_train - INFO - Pretrain Epoch [610/1000], Loss: 0.0576
+2025-07-11 23:43:52,782 - PIGAN_train - INFO - Pretrain Epoch [620/1000], Loss: 0.0594
+2025-07-11 23:45:54,252 - PIGAN_train - INFO - Pretrain Epoch [630/1000], Loss: 0.0574
+2025-07-11 23:48:03,087 - PIGAN_train - INFO - Pretrain Epoch [640/1000], Loss: 0.0603
+2025-07-11 23:49:57,962 - PIGAN_train - INFO - Pretrain Epoch [650/1000], Loss: 0.0567
+2025-07-11 23:51:31,802 - PIGAN_train - INFO - Pretrain Epoch [660/1000], Loss: 0.0572
+2025-07-11 23:53:14,036 - PIGAN_train - INFO - Pretrain Epoch [670/1000], Loss: 0.0587
+2025-07-11 23:54:49,158 - PIGAN_train - INFO - Pretrain Epoch [680/1000], Loss: 0.0579
