@@ -7,27 +7,27 @@ from torch.utils.data import DataLoader
 import os
 import sys
 import argparse
-from tqdm import tqdm
+from tqdm.notebook import tqdm # <<<<<<< 更改：导入 tqdm.notebook 以兼容 Colab
+import numpy as np # 用于处理数据，例如 dataset.frequencies
 
-# Ensure the project root is in Python path for module imports
-# This is crucial when running this script directly
+# 将项目根目录添加到 Python 路径
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-# Import all models
+# 导入所有模型
 from core.models.generator import Generator
 from core.models.discriminator import Discriminator
 from core.models.forward_model import ForwardModel
 
-# Import all necessary utility functions and loss functions
+# 导入所有需要的工具函数和损失函数
 from core.utils.data_loader import MetamaterialDataset, denormalize_params, denormalize_metrics
-from core.utils.set_seed import set_seed # Import set_seed utility
+from core.utils.set_seed import set_seed
 from core.utils.loss import criterion_bce, criterion_mse, \
                              maxwell_equation_loss, lc_model_approx_loss, \
                              structural_param_range_loss, bnn_kl_loss
 
-# Import configuration
+# 导入配置
 import config.config as cfg
 
 
@@ -36,35 +36,50 @@ def train_pigan(dataloader: DataLoader, device: torch.device,
                 forward_model: ForwardModel, dataset: MetamaterialDataset,
                 num_epochs: int):
     """
-    Trains the PI-GAN model.
+    训练 PI-GAN 模型。
 
     Args:
-        dataloader (DataLoader): Data loader.
-        device (torch.device): Training device (CPU/GPU).
-        generator (Generator): Generator model instance.
-        discriminator (Discriminator): Discriminator model instance.
-        forward_model (ForwardModel): Pretrained forward simulation model instance.
-        dataset (MetamaterialDataset): Dataset instance, for accessing parameter and metric normalization ranges.
-        num_epochs (int): Number of epochs to train for.
+        dataloader (DataLoader): 数据加载器。
+        device (torch.device): 训练设备 (CPU/GPU)。
+        generator (Generator): 生成器模型实例。
+        discriminator (Discriminator): 判别器模型实例。
+        forward_model (ForwardModel): 前向仿真模型实例 (已预训练)。
+        dataset (MetamaterialDataset): 数据集实例，用于访问参数和指标的归一化范围。
+        num_epochs (int): 训练的 epoch 数量。
+    Returns:
+        dict: 包含所有损失历史的字典。
     """
     print("\n--- Starting PI-GAN Training ---")
 
-    # Define optimizers
+    # 定义优化器
     optimizer_g = optim.Adam(generator.parameters(), lr=cfg.LR_G, betas=(0.5, 0.999))
     optimizer_d = optim.Adam(discriminator.parameters(), lr=cfg.LR_D, betas=(0.5, 0.999))
 
-    # Define loss function instances
+    # 定义损失函数实例
     bce_criterion = criterion_bce()
     mse_criterion = criterion_mse()
 
-    # Set models to training/evaluation mode
+    # 设置模型为训练/评估模式
     generator.train()
     discriminator.train()
-    forward_model.eval() # ForwardModel is usually kept in evaluation mode during PI-GAN training for stable predictions
+    forward_model.eval() # ForwardModel 通常在 PI-GAN 训练中保持评估模式
 
-    # Training loop
+    # 初始化用于记录的损失列表
+    loss_history = {
+        'd_losses': [],
+        'g_losses': [],
+        'adv_losses': [],
+        'recon_spec_losses': [],
+        'recon_metrics_losses': [],
+        'maxwell_losses': [],
+        'lc_losses': [],
+        'param_range_losses': [],
+        'bnn_kl_losses': []
+    }
+
+    # 训练循环
     for epoch in range(num_epochs):
-        # Initialize total losses for the epoch
+        # 初始化每个 epoch 的总损失
         total_d_loss = 0.0
         total_g_loss = 0.0
         total_adv_loss = 0.0
@@ -97,7 +112,7 @@ def train_pigan(dataloader: DataLoader, device: torch.device,
 
             # 2. D's output on generated data pairs (spectrum, fake parameters)
             # Generate fake structural parameters (normalized)
-            predicted_params_norm = generator(real_spectrum) # Generator takes real_spectrum as input
+            predicted_params_norm = generator(real_spectrum)
             # Denormalize fake parameters for Discriminator, then detach to stop gradients flowing back to G
             predicted_params_denorm_for_d = denormalize_params(predicted_params_norm.detach(), dataset.param_ranges)
 
@@ -115,7 +130,7 @@ def train_pigan(dataloader: DataLoader, device: torch.device,
 
             # G wants D to classify its fake data as real
             # Regenerate parameters to ensure gradient flow to G
-            predicted_params_norm = generator(real_spectrum) # Generator takes real_spectrum as input
+            predicted_params_norm = generator(real_spectrum)
             predicted_params_denorm_for_g = denormalize_params(predicted_params_norm, dataset.param_ranges)
 
             output_g = discriminator(real_spectrum, predicted_params_denorm_for_g)
@@ -133,6 +148,7 @@ def train_pigan(dataloader: DataLoader, device: torch.device,
             loss_recon_metrics = mse_criterion(predicted_metrics_norm, real_metrics_norm)
 
             # Maxwell's equations loss
+            # Ensure dataset.frequencies is available and converted to tensor correctly
             frequencies_tensor = torch.tensor(dataset.frequencies, dtype=torch.float32, device=device).unsqueeze(0)
             loss_maxwell = maxwell_equation_loss(recon_spectrum, frequencies_tensor, predicted_params_norm)
 
@@ -201,6 +217,18 @@ def train_pigan(dataloader: DataLoader, device: torch.device,
             print(f"  Physics_Losses - Maxwell: {avg_maxwell_loss:.4f}, "
                   f"LC: {avg_lc_loss:.4f}, ParamRange: {avg_param_range_loss:.4f}, "
                   f"BNN_KL: {avg_bnn_kl_loss:.4f}")
+            
+            # 记录平均损失到列表中
+            loss_history['d_losses'].append(avg_d_loss)
+            loss_history['g_losses'].append(avg_g_loss)
+            loss_history['adv_losses'].append(avg_adv_loss)
+            loss_history['recon_spec_losses'].append(avg_recon_loss_spec)
+            loss_history['recon_metrics_losses'].append(avg_recon_loss_metrics)
+            loss_history['maxwell_losses'].append(avg_maxwell_loss)
+            loss_history['lc_losses'].append(avg_lc_loss)
+            loss_history['param_range_losses'].append(avg_param_range_loss)
+            loss_history['bnn_kl_losses'].append(avg_bnn_kl_loss)
+
 
         # Save checkpoint
         if (epoch + 1) % cfg.SAVE_MODEL_INTERVAL == 0:
@@ -224,6 +252,13 @@ def train_pigan(dataloader: DataLoader, device: torch.device,
     torch.save(discriminator.state_dict(), os.path.join(cfg.SAVED_MODELS_DIR, "discriminator_final.pth"))
     torch.save(forward_model.state_dict(), os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_final.pth"))
     print(f"Final models saved to {cfg.SAVED_MODELS_DIR}")
+
+    # 保存损失历史，以便后续评估脚本使用
+    loss_history_path = os.path.join(cfg.SAVED_MODELS_DIR, "pigan_loss_history.pt")
+    torch.save(loss_history, loss_history_path)
+    print(f"PI-GAN training loss history saved to {loss_history_path}")
+
+    return loss_history
 
 
 if __name__ == '__main__':
@@ -272,7 +307,6 @@ if __name__ == '__main__':
     print(f"Number of batches per epoch: {len(dataloader)}")
 
     # 4. Initialize models
-    # Corrected Generator instantiation: input_dim should be SPECTRUM_DIM
     generator = Generator(input_dim=cfg.SPECTRUM_DIM, output_dim=cfg.GENERATOR_OUTPUT_PARAM_DIM).to(device)
     discriminator = Discriminator(input_spec_dim=cfg.DISCRIMINATOR_INPUT_SPEC_DIM, 
                                   input_param_dim=cfg.DISCRIMINATOR_INPUT_PARAM_DIM).to(device)
@@ -295,6 +329,7 @@ if __name__ == '__main__':
         sys.exit(1) # Exit if pretrained model is missing
 
     # 6. Call the training function
+    # 这里不再直接进行评估和可视化，只执行训练并保存模型和损失历史
     train_pigan(
         dataloader=dataloader,
         device=device,
@@ -302,7 +337,7 @@ if __name__ == '__main__':
         discriminator=discriminator,
         forward_model=forward_model,
         dataset=dataset,
-        num_epochs=args.epochs # Pass epochs from argparse
+        num_epochs=args.epochs
     )
 
     print("\n--- PI-GAN Direct Run Complete ---")

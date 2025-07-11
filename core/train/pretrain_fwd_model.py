@@ -7,9 +7,9 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import argparse
-from tqdm import tqdm # 导入 tqdm 用于进度条
+from tqdm.notebook import tqdm # <<<<<<< 更改：导入 tqdm.notebook 以兼容 Colab
 
-# 将项目根目录添加到 Python 路径 (保留此部分以解决模块导入问题)
+# 将项目根目录添加到 Python 路径
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if project_root not in sys.path:
     sys.path.append(project_root)
@@ -18,12 +18,11 @@ if project_root not in sys.path:
 from core.models.forward_model import ForwardModel
 from core.utils.loss import criterion_mse # 用于光谱和指标的重建损失
 import config.config as cfg # 导入 config
-# from core.utils.logger import Logger # <<<<<<< 已移除 Logger 导入
 from core.utils.data_loader import MetamaterialDataset # 导入 MetamaterialDataset
 from core.utils.set_seed import set_seed # 导入设置随机种子的函数
 
 def pretrain_forward_model(forward_model: ForwardModel, dataloader: DataLoader, device: torch.device,
-                           num_epochs: int, lr: float): # <<<<<<< 已移除 logger 参数
+                           num_epochs: int, lr: float):
     """
     预训练前向仿真模型 (ForwardModel)。
 
@@ -33,18 +32,22 @@ def pretrain_forward_model(forward_model: ForwardModel, dataloader: DataLoader, 
         device (torch.device): 训练设备 (CPU/GPU)。
         num_epochs (int): 预训练的 epoch 数量。
         lr (float): 预训练的学习率。
+    Returns:
+        list: 包含每个 epoch 平均损失的列表。
     """
-    print("\n--- Pretraining Forward Model ---") # <<<<<<< 替换 logger.info
+    print("\n--- Pretraining Forward Model ---")
 
     # 定义优化器和损失函数
     optimizer = optim.Adam(forward_model.parameters(), lr=lr)
     mse_criterion = criterion_mse() # 实例化 MSE 损失
 
+    # 初始化用于记录平均损失的列表
+    epoch_losses = [] # 用于记录每个 epoch 的总平均损失
+
     # 设置模型为训练模式 (重要，因为 ForwardModel 包含 Dropout)
     forward_model.train()
 
     # 预训练循环
-    # global_step = 0 # <<<<<<< 移除，因为不再需要 TensorBoard 记录
     for epoch in range(num_epochs):
         total_loss = 0.0
         # 使用 tqdm 包装 dataloader，显示进度条
@@ -74,7 +77,6 @@ def pretrain_forward_model(forward_model: ForwardModel, dataloader: DataLoader, 
             optimizer.step()
 
             total_loss += loss.item()
-            # global_step += 1 # <<<<<<< 移除
 
             # 更新进度条的后缀信息
             progress_bar.set_postfix(
@@ -83,22 +85,25 @@ def pretrain_forward_model(forward_model: ForwardModel, dataloader: DataLoader, 
                 MetricsLoss=f"{loss_metrics.item():.4f}"
             )
 
-            # if global_step % cfg.LOG_INTERVAL == 0: # <<<<<<< 移除 TensorBoard 记录
-            #     # ... 移除所有 logger.add_scalar 调用 ...
-
         avg_loss = total_loss / len(dataloader)
+        epoch_losses.append(avg_loss) # 记录每个 epoch 的平均损失
 
-        # 每个 epoch 结束时的日志记录 (简化)
-        # if (epoch + 1) % cfg.LOG_INTERVAL == 0: # <<<<<<< 如果希望每个 epoch 都打印，可以移除此 if
+        # 每个 epoch 结束时的日志记录
         print(f"Pretrain Epoch [{epoch+1}/{num_epochs}], Avg Loss: {avg_loss:.4f}")
-        # <<<<<<< 移除 logger.add_scalar 调用
 
     # 预训练结束后保存模型
     os.makedirs(cfg.SAVED_MODELS_DIR, exist_ok=True)
     fwd_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_pretrained.pth")
     torch.save(forward_model.state_dict(), fwd_model_path)
-    print(f"Pretrained ForwardModel saved to {fwd_model_path}") # <<<<<<< 替换 logger.info
-    print("--- Forward Model Pretraining Complete ---") # <<<<<<< 替换 logger.info
+    print(f"Pretrained ForwardModel saved to {fwd_model_path}")
+    print("--- Forward Model Pretraining Complete ---")
+
+    # 保存损失历史，以便后续评估脚本使用
+    loss_history_path = os.path.join(cfg.SAVED_MODELS_DIR, "fwd_pretrain_loss_history.pt")
+    torch.save(epoch_losses, loss_history_path)
+    print(f"Forward Model pretraining loss history saved to {loss_history_path}")
+
+    return epoch_losses # 返回记录的损失列表
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Pretrain the Forward Model.")
@@ -111,25 +116,25 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-    # <<<<<<< 已移除 Logger 初始化
-    # logger = Logger("FWD_Pretrain", log_dir=os.path.join(cfg.LOG_DIR, "FWD_Pretrain"), 
-    #                 use_tensorboard=True)
-    print("--- Starting Forward Model Pretraining Script ---") # <<<<<<< 替换 logger.info
-    print(f"Arguments: {args}") # <<<<<<< 替换 logger.info
+    print("--- Starting Forward Model Pretraining Script ---")
+    print(f"Arguments: {args}")
 
     # 设置设备
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}") # <<<<<<< 替换 logger.info
+    print(f"Using device: {device}")
 
     # 设置随机种子
     set_seed(cfg.RANDOM_SEED)
-    print(f"Random seed set to: {cfg.RANDOM_SEED}") # <<<<<<< 替换 logger.info
+    print(f"Random seed set to: {cfg.RANDOM_SEED}")
 
     # --- 数据加载 ---
+    # 确保创建必要的目录，包括 plots 目录
+    cfg.create_directories() 
+
     data_path = cfg.DATASET_PATH
     if not os.path.exists(data_path):
-        print(f"Error: Dataset not found at {data_path}. Please check config.py and ensure the CSV file is there.") # <<<<<<< 替换 logger.error
-        exit() # 退出脚本
+        print(f"Error: Dataset not found at {data_path}. Please check config.py and ensure the CSV file is there.")
+        sys.exit(1) # 使用 sys.exit(1) 更明确地表示错误退出
 
     dataset = MetamaterialDataset(data_path=data_path, num_points_per_sample=cfg.SPECTRUM_DIM)
     dataloader = torch.utils.data.DataLoader(
@@ -139,8 +144,8 @@ if __name__ == "__main__":
         num_workers=cfg.NUM_WORKERS,
         pin_memory=True
     )
-    print(f"Dataset size: {len(dataset)} samples") # <<<<<<< 替换 logger.info
-    print(f"Number of batches: {len(dataloader)}") # <<<<<<< 替换 logger.info
+    print(f"Dataset size: {len(dataset)} samples")
+    print(f"Number of batches: {len(dataloader)}")
 
     # --- 模型初始化 ---
     forward_model = ForwardModel(
@@ -149,15 +154,16 @@ if __name__ == "__main__":
         output_metrics_dim=cfg.FORWARD_MODEL_OUTPUT_METRICS_DIM
     ).to(device)
 
-    print(f"ForwardModel Architecture:\n{forward_model}") # <<<<<<< 替换 logger.info
+    print(f"ForwardModel Architecture:\n{forward_model}")
 
     # --- 调用预训练函数 ---
+    # 这里不再直接进行评估和可视化，只执行训练并保存模型和损失历史
     pretrain_forward_model(
         forward_model=forward_model,
         dataloader=dataloader,
         device=device,
         num_epochs=args.epochs,
-        lr=args.lr # <<<<<<< 已移除 logger 参数
+        lr=args.lr
     )
 
-    print("--- Forward Model Pretraining Script Finished ---") # <<<<<<< 替换 logger.info
+    print("--- Forward Model Pretraining Script Finished ---")
