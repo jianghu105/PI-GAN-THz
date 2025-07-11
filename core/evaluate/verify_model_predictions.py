@@ -29,28 +29,34 @@ def verify_predictions(num_samples: int = 10):
         num_samples (int): The number of samples whose prediction results
                            will be verified and visualized.
     """
-    tqdm.write("\n--- Starting Model Prediction Verification Script ---") # <<<<< Use tqdm.write
+    tqdm.write("\n--- Starting Model Prediction Verification Script ---")
+    sys.stdout.flush() # Ensure immediate output
 
     # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tqdm.write(f"Using device: {device}") # <<<<< Use tqdm.write
+    tqdm.write(f"Using device: {device}")
+    sys.stdout.flush()
 
     # Set random seed for reproducibility
     set_seed(cfg.RANDOM_SEED)
-    tqdm.write(f"Random seed set to: {cfg.RANDOM_SEED}") # <<<<< Use tqdm.write
+    tqdm.write(f"Random seed set to: {cfg.RANDOM_SEED}")
+    sys.stdout.flush()
 
     # Ensure necessary directories are created, including plots directory
     cfg.create_directories()
-    tqdm.write(f"Plots will be saved to: {cfg.PLOTS_DIR}") # <<<<< Use tqdm.write
+    tqdm.write(f"Plots will be saved to: {cfg.PLOTS_DIR}")
+    sys.stdout.flush()
 
     # --- Data Loading ---
     data_path = cfg.DATASET_PATH
     if not os.path.exists(data_path):
-        tqdm.write(f"Error: Dataset not found at {data_path}. Please check config.py and ensure the CSV file exists.") # <<<<< Use tqdm.write
+        tqdm.write(f"Error: Dataset not found at {data_path}. Please check config.py and ensure the CSV file exists.")
+        sys.stdout.flush() # Ensure immediate output
         return # Gracefully exit
 
     dataset = MetamaterialDataset(data_path=data_path, num_points_per_sample=cfg.SPECTRUM_DIM)
-    tqdm.write(f"Dataset loaded, containing {len(dataset)} samples.") # <<<<< Use tqdm.write
+    tqdm.write(f"Dataset loaded, containing {len(dataset)} samples.")
+    sys.stdout.flush()
 
     # --- Model Initialization and Loading ---
     generator = Generator(input_dim=cfg.SPECTRUM_DIM, output_dim=cfg.GENERATOR_OUTPUT_PARAM_DIM).to(device)
@@ -60,47 +66,56 @@ def verify_predictions(num_samples: int = 10):
     
     # Define model save paths
     gen_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "generator_final.pth")
-    fwd_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_final.pth") # Or forward_model_pretrained.pth
+    fwd_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_final.pth") 
 
     # Check if model files exist
     models_found = True
     if not os.path.exists(gen_model_path):
-        tqdm.write(f"Error: Generator model not found at {gen_model_path}.") # <<<<< Use tqdm.write
+        tqdm.write(f"Error: Generator model not found at {gen_model_path}.")
+        sys.stdout.flush()
         models_found = False
     if not os.path.exists(fwd_model_path):
-        tqdm.write(f"Error: ForwardModel not found at {fwd_model_path}.") # <<<<< Use tqdm.write
+        tqdm.write(f"Error: ForwardModel not found at {fwd_model_path}.")
+        sys.stdout.flush()
         models_found = False
     
     if not models_found:
-        tqdm.write("Please ensure PI-GAN training and ForwardModel pre-training are complete and all models are saved.") # <<<<< Use tqdm.write
+        tqdm.write("Please ensure PI-GAN training and ForwardModel pre-training are complete and all models are saved.")
+        sys.stdout.flush()
         return
 
     try:
         generator.load_state_dict(torch.load(gen_model_path, map_location=device))
         forward_model.load_state_dict(torch.load(fwd_model_path, map_location=device))
-        tqdm.write(f"Generator and ForwardModel loaded from {cfg.SAVED_MODELS_DIR}.") # <<<<< Use tqdm.write
+        tqdm.write(f"Generator and ForwardModel loaded from {cfg.SAVED_MODELS_DIR}.")
+        sys.stdout.flush()
     except Exception as e:
-        tqdm.write(f"Error: An exception occurred while loading models: {e}") # <<<<< Use tqdm.write
-        tqdm.write("Please check if model files are corrupted or do not match the model architecture.") # <<<<< Use tqdm.write
+        tqdm.write(f"Error: An exception occurred while loading models: {e}")
+        tqdm.write("Please check if model files are corrupted or do not match the model architecture.")
+        sys.stdout.flush()
         return
 
     generator.eval() # Switch to evaluation mode
     forward_model.eval() # Switch to evaluation mode
 
     # --- Randomly select samples for prediction and visualization ---
-    tqdm.write(f"\n--- Generating Model Prediction Visualizations for {num_samples} samples ---") # <<<<< Use tqdm.write
+    tqdm.write(f"\n--- Generating Model Prediction Visualizations for {num_samples} samples ---")
+    sys.stdout.flush()
     mse_criterion = criterion_mse() # Initialize MSE criterion
 
     if num_samples <= 0:
-        tqdm.write("Warning: Number of samples to verify is 0 or negative, skipping prediction verification.") # <<<<< Use tqdm.write
+        tqdm.write("Warning: Number of samples to verify is 0 or negative, skipping prediction verification.")
+        sys.stdout.flush()
         return
     
     if num_samples > len(dataset):
-        tqdm.write(f"Warning: Number of samples to verify ({num_samples}) exceeds dataset size ({len(dataset)}). Verifying all {len(dataset)} samples.") # <<<<< Use tqdm.write
+        tqdm.write(f"Warning: Number of samples to verify ({num_samples}) exceeds dataset size ({len(dataset)}). Verifying all {len(dataset)} samples.")
+        sys.stdout.flush()
         num_samples = len(dataset)
     
     if num_samples == 0:
-        tqdm.write("Not enough samples available for verification.") # <<<<< Use tqdm.write
+        tqdm.write("Not enough samples available for verification.")
+        sys.stdout.flush()
         return
 
     # Randomly select sample indices
@@ -169,19 +184,24 @@ def verify_predictions(num_samples: int = 10):
             save_path=os.path.join(cfg.PLOTS_DIR, 'model_prediction_verification.png'),
             metric_names=metric_names
         )
-        tqdm.write(f"Model prediction verification plot saved to {cfg.PLOTS_DIR}") # <<<<< Use tqdm.write
+        tqdm.write(f"Model prediction verification plot saved to {cfg.PLOTS_DIR}")
+        sys.stdout.flush()
     else:
-        tqdm.write("No prediction verification data available for plotting.") # <<<<< Use tqdm.write
+        tqdm.write("No prediction verification data available for plotting.")
+        sys.stdout.flush()
 
     if num_processed_samples > 0:
         avg_spectrum_mse = total_spectrum_mse / num_processed_samples
         avg_metrics_mse = total_metrics_mse / num_processed_samples
-        tqdm.write(f"\nAverage Spectrum MSE (Real vs. Forward Model Predicted): {avg_spectrum_mse:.4f}") # <<<<< Use tqdm.write
-        tqdm.write(f"Average Metrics MSE (Real vs. Forward Model Predicted): {avg_metrics_mse:.4f}") # <<<<< Use tqdm.write
+        tqdm.write(f"\nAverage Spectrum MSE (Real vs. Forward Model Predicted): {avg_spectrum_mse:.4f}")
+        tqdm.write(f"Average Metrics MSE (Real vs. Forward Model Predicted): {avg_metrics_mse:.4f}")
+        sys.stdout.flush()
     else:
-        tqdm.write("No samples processed for MSE calculation.") # <<<<< Use tqdm.write
+        tqdm.write("No samples processed for MSE calculation.")
+        sys.stdout.flush()
 
-    tqdm.write("--- Model Prediction Verification Script Completed ---") # <<<<< Use tqdm.write
+    tqdm.write("--- Model Prediction Verification Script Completed ---")
+    sys.stdout.flush()
 
 
 if __name__ == "__main__":

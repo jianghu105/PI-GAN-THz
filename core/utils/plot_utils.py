@@ -4,26 +4,29 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
+# Removed setup_matplotlib_for_chinese as per request to remove Chinese characters.
+
 def plot_losses(epochs: list, losses: dict, title: str, xlabel: str, ylabel: str, save_path: str):
     """
-    绘制损失曲线图。
+    Plots multiple loss curves.
 
     Args:
-        epochs (list): 对应损失值的 epoch 列表。
-        losses (dict): 包含多个损失曲线的字典，键是曲线名称，值是损失值列表。
-                       例如：{'Loss A': [val1, val2, ...], 'Loss B': [val1, val2, ...]}
-        title (str): 图表标题。
-        xlabel (str): X轴标签。
-        ylabel (str): Y轴标签。
-        save_path (str): 保存图表的路径。
+        epochs (list): List of epochs corresponding to the loss values.
+        losses (dict): Dictionary containing multiple loss curves.
+                       Keys are curve names (labels), and values are lists of loss values.
+                       Example: {'Loss A': [val1, val2, ...], 'Loss B': [val1, val2, ...]}
+        title (str): Title of the plot.
+        xlabel (str): Label for the X-axis.
+        ylabel (str): Label for the Y-axis.
+        save_path (str): Full path to save the plot.
     """
     plt.figure(figsize=(10, 6))
     for label, data in losses.items():
         plt.plot(epochs, data, label=label)
     
     plt.title(title)
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
+    plt.xlabel(xlabel) # Using the provided xlabel
+    plt.ylabel(ylabel) # Using the provided ylabel
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -41,24 +44,25 @@ def plot_generated_samples(
     save_path: str = 'generated_samples.png'
 ):
     """
-    可视化真实光谱与重构光谱，以及对应的真实参数与预测参数（用于 PI-GAN 的生成结果）。
+    Visualizes real vs. reconstructed spectra and their corresponding real vs. predicted parameters
+    (for PI-GAN generation results).
 
     Args:
-        real_spectrums (np.ndarray): 真实光谱数据 (batch_size, spectrum_dim)。
-        recon_spectrums (np.ndarray): 重构光谱数据 (batch_size, spectrum_dim)。
-        real_params (np.ndarray): 真实结构参数 (batch_size, param_dim)。
-        predicted_params (np.ndarray): 预测结构参数 (batch_size, param_dim)。
-        frequencies (np.ndarray): 光谱对应的频率点 (spectrum_dim,)。
-        num_samples (int): 要可视化的样本数量。
-        save_path (str): 保存图表的路径。
+        real_spectrums (np.ndarray): Real spectrum data (batch_size, spectrum_dim).
+        recon_spectrums (np.ndarray): Reconstructed spectrum data (batch_size, spectrum_dim).
+        real_params (np.ndarray): Real structural parameters (batch_size, param_dim).
+        predicted_params (np.ndarray): Predicted structural parameters (batch_size, param_dim).
+        frequencies (np.ndarray): Frequency points corresponding to the spectrum (spectrum_dim,).
+        num_samples (int): Number of samples to visualize.
+        save_path (str): Path to save the plot.
     """
-    fig, axes = plt.subplots(num_samples, 2, figsize=(14, num_samples * 4)) # 两列：光谱对比和参数对比
+    fig, axes = plt.subplots(num_samples, 2, figsize=(14, num_samples * 4)) # Two columns: spectrum comparison and parameter comparison
 
-    if num_samples == 1: # 如果只有一个样本，axes 可能不是二维数组，做一下处理
+    if num_samples == 1: # If only one sample, axes might not be a 2D array, handle it
         axes = np.expand_dims(axes, axis=0)
 
     for i in range(num_samples):
-        # 第一列：光谱对比
+        # First column: Spectrum Comparison
         ax1 = axes[i, 0]
         ax1.plot(frequencies, real_spectrums[i], label='Real Spectrum', color='blue')
         ax1.plot(frequencies, recon_spectrums[i], label='Reconstructed Spectrum', color='red', linestyle='--')
@@ -68,11 +72,11 @@ def plot_generated_samples(
         ax1.legend()
         ax1.grid(True)
 
-        # 第二列：参数对比
+        # Second column: Parameter Comparison
         ax2 = axes[i, 1]
         param_indices = np.arange(real_params.shape[1])
-        ax2.bar(param_indices - 0.2, real_params[i], width=0.4, label='Real Params', color='skyblue')
-        ax2.bar(param_indices + 0.2, predicted_params[i], width=0.4, label='Predicted Params', color='lightcoral')
+        ax2.bar(param_indices - 0.2, real_params[i], width=0.4, label='Real Parameters', color='skyblue')
+        ax2.bar(param_indices + 0.2, predicted_params[i], width=0.4, label='Predicted Parameters', color='lightcoral')
         ax2.set_xticks(param_indices)
         ax2.set_xticklabels([f'P{j+1}' for j in param_indices]) 
         ax2.set_title(f'Sample {i+1}: Parameter Comparison')
@@ -98,26 +102,26 @@ def plot_fwd_model_predictions(
     metric_names: list = None
 ):
     """
-    可视化前向模型预测的 Spectra 和 Metrics。
+    Visualizes forward model predictions for Spectra and Metrics.
 
     Args:
-        real_params (np.ndarray): 真实结构参数 (batch_size, param_dim)。
-        real_spectrums (np.ndarray): 真实光谱数据 (batch_size, spectrum_dim)。
-        predicted_spectrums (np.ndarray): 预测光谱数据 (batch_size, spectrum_dim)。
-        real_metrics (np.ndarray): 真实物理指标数据 (batch_size, metrics_dim)。
-        predicted_metrics (np.ndarray): 预测物理指标数据 (batch_size, metrics_dim)。
-        frequencies (np.ndarray): 光谱对应的频率点 (spectrum_dim,)。
-        num_samples (int): 要可视化的样本数量。
-        save_path (str): 保存图表的路径。
-        metric_names (list): 物理指标的名称列表，用于图例。
+        real_params (np.ndarray): Real structural parameters (batch_size, param_dim).
+        real_spectrums (np.ndarray): Real spectrum data (batch_size, spectrum_dim).
+        predicted_spectrums (np.ndarray): Predicted spectrum data (batch_size, spectrum_dim).
+        real_metrics (np.ndarray): Real physical metric data (batch_size, metrics_dim).
+        predicted_metrics (np.ndarray): Predicted physical metric data (batch_size, metrics_dim).
+        frequencies (np.ndarray): Frequency points corresponding to the spectrum (spectrum_dim,).
+        num_samples (int): Number of samples to visualize.
+        save_path (str): Path to save the plot.
+        metric_names (list): List of names for physical metrics, used for legends.
     """
-    fig, axes = plt.subplots(num_samples, 3, figsize=(18, num_samples * 4)) # 三列：参数、光谱对比、指标对比
+    fig, axes = plt.subplots(num_samples, 3, figsize=(18, num_samples * 4)) # Three columns: Parameters, Spectrum Comparison, Metrics Comparison
 
-    if num_samples == 1: # 如果只有一个样本，axes 可能不是二维数组，做一下处理
+    if num_samples == 1: # If only one sample, axes might not be a 2D array, handle it
         axes = np.expand_dims(axes, axis=0)
 
     for i in range(num_samples):
-        # 第一列：输入参数
+        # First column: Input Parameters
         ax1 = axes[i, 0]
         param_indices = np.arange(real_params.shape[1])
         ax1.bar(param_indices, real_params[i], color='lightgray')
@@ -127,17 +131,17 @@ def plot_fwd_model_predictions(
         ax1.set_ylabel('Value')
         ax1.grid(True, axis='y')
 
-        # 第二列：光谱对比
+        # Second column: Spectrum Comparison
         ax2 = axes[i, 1]
         ax2.plot(frequencies, real_spectrums[i], label='Real Spectrum', color='blue')
         ax2.plot(frequencies, predicted_spectrums[i], label='Predicted Spectrum', color='red', linestyle='--')
         ax2.set_title(f'Sample {i+1}: Spectrum Prediction')
-        ax2.set_xlabel('Frequency')
+        ax2.set_xlabel('Frequency (THz)')
         ax2.set_ylabel('Amplitude')
         ax2.legend()
         ax2.grid(True)
 
-        # 第三列：指标对比
+        # Third column: Metrics Comparison
         ax3 = axes[i, 2]
         metric_indices = np.arange(real_metrics.shape[1])
         width = 0.35

@@ -25,14 +25,17 @@ def evaluate_forward_model(num_samples_to_plot: int = 5):
         num_samples_to_plot (int): 要可视化预测结果的样本数量。
     """
     print("\n--- Starting Forward Model Evaluation Script ---")
+    sys.stdout.flush() # 立即刷新输出
 
     # 设置设备
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
+    sys.stdout.flush()
 
     # 设置随机种子，确保结果可复现
     set_seed(cfg.RANDOM_SEED)
     print(f"Random seed set to: {cfg.RANDOM_SEED}")
+    sys.stdout.flush()
 
     # 确保创建必要的目录，包括 plots 目录
     cfg.create_directories() 
@@ -41,10 +44,12 @@ def evaluate_forward_model(num_samples_to_plot: int = 5):
     data_path = cfg.DATASET_PATH
     if not os.path.exists(data_path):
         print(f"Error: Dataset not found at {data_path}. Please check config.py and ensure the CSV file is there.")
+        sys.stdout.flush() # 立即刷新错误输出
         sys.exit(1)
 
     dataset = MetamaterialDataset(data_path=data_path, num_points_per_sample=cfg.SPECTRUM_DIM)
     print(f"Dataset size: {len(dataset)} samples")
+    sys.stdout.flush()
 
     # --- 模型初始化和加载 ---
     forward_model = ForwardModel(
@@ -53,27 +58,33 @@ def evaluate_forward_model(num_samples_to_plot: int = 5):
         output_metrics_dim=cfg.FORWARD_MODEL_OUTPUT_METRICS_DIM
     ).to(device)
 
-    fwd_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_pretrained.pth")
+    # 修正模型文件名为 'forward_model_final.pth'
+    fwd_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_final.pth") 
     if not os.path.exists(fwd_model_path):
-        print(f"Error: Pretrained Forward Model not found at {fwd_model_path}. Please run pretrain_fwd_model.py first.")
+        print(f"Error: Pretrained Forward Model not found at {fwd_model_path}. Please run pretrain_fwd_model.py first, or ensure 'forward_model_final.pth' exists.")
+        sys.stdout.flush() # 立即刷新错误输出
         sys.exit(1)
     
     forward_model.load_state_dict(torch.load(fwd_model_path, map_location=device))
     forward_model.eval() # 切换到评估模式
     print(f"Loaded pretrained ForwardModel from {fwd_model_path}")
+    sys.stdout.flush()
 
     # --- 加载损失历史 ---
     loss_history_path = os.path.join(cfg.SAVED_MODELS_DIR, "fwd_pretrain_loss_history.pt")
     if not os.path.exists(loss_history_path):
         print(f"Warning: Forward Model pretraining loss history not found at {loss_history_path}. Loss plot cannot be generated.")
+        sys.stdout.flush()
         epoch_losses = []
     else:
         epoch_losses = torch.load(loss_history_path)
         print(f"Loaded Forward Model pretraining loss history from {loss_history_path}")
+        sys.stdout.flush()
 
     # --- 绘制损失曲线 ---
     if epoch_losses:
         print("\n--- Generating Pretraining Loss Plots ---")
+        sys.stdout.flush()
         plot_losses(
             epochs=list(range(1, len(epoch_losses) + 1)),
             losses={'Forward Model Loss': epoch_losses},
@@ -82,17 +93,21 @@ def evaluate_forward_model(num_samples_to_plot: int = 5):
             ylabel='MSE Loss',
             save_path=os.path.join(cfg.PLOTS_DIR, 'fwd_pretrain_loss.png')
         )
-        print(f"Loss plot saved to {cfg.PLOTS_DIR}")
+        print(f"Loss plot saved to {os.path.join(cfg.PLOTS_DIR, 'fwd_pretrain_loss.png')}") # 修正打印的路径
+        sys.stdout.flush()
     else:
         print("No loss history available to plot.")
+        sys.stdout.flush()
 
     # --- 生成样本可视化 ---
     print("\n--- Generating Forward Model Prediction Samples ---")
+    sys.stdout.flush()
     with torch.no_grad():
         # 从数据集中随机选择一些样本进行可视化
         if num_samples_to_plot > len(dataset):
             num_samples_to_plot = len(dataset)
             print(f"Warning: num_samples_to_plot exceeds dataset size. Plotting all {num_samples_to_plot} samples.")
+            sys.stdout.flush()
         
         sample_indices = np.random.choice(len(dataset), num_samples_to_plot, replace=False)
         
@@ -126,8 +141,10 @@ def evaluate_forward_model(num_samples_to_plot: int = 5):
             save_path=os.path.join(cfg.PLOTS_DIR, 'fwd_model_predictions.png'),
             metric_names=dataset.metrics_names # 传递指标名称以便绘制
         )
-    print(f"Forward model prediction plots saved to {cfg.PLOTS_DIR}")
+    print(f"Forward model prediction plots saved to {os.path.join(cfg.PLOTS_DIR, 'fwd_model_predictions.png')}") # 修正打印的路径
+    sys.stdout.flush()
     print("--- Forward Model Evaluation Script Finished ---")
+    sys.stdout.flush()
 
 
 if __name__ == "__main__":
