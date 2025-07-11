@@ -1,5 +1,3 @@
-# PI_GAN_THZ/core/train/pretrain_fwd_model.py
-
 import sys
 import os
 import torch
@@ -32,11 +30,11 @@ def pretrain_forward_model(forward_model: ForwardModel, dataloader: DataLoader, 
         device (torch.device): 训练设备 (CPU/GPU)。
         num_epochs (int): 预训练的 epoch 数量。
         lr (float): 预训练的学习率。
-        log_interval (int): 每隔多少批次输出一次详细日志。
+        log_interval (int): 每隔多少批次输出一次详细日志和更新进度条后缀。
     Returns:
         list: 包含每个 epoch 平均损失的列表。
     """
-    print("\n--- 正在预训练前向模型 ---")
+    tqdm.write("\n--- 正在预训练前向模型 ---") # <<<<< 使用 tqdm.write
 
     # 定义优化器和损失函数
     optimizer = optim.Adam(forward_model.parameters(), lr=lr)
@@ -50,14 +48,19 @@ def pretrain_forward_model(forward_model: ForwardModel, dataloader: DataLoader, 
 
     # 预训练循环
     for epoch in range(num_epochs):
-        total_loss = 0.0
-        total_spectrum_loss = 0.0 # 新增：用于记录光谱损失
-        total_metrics_loss = 0.0  # 新增：用于记录指标损失
+        # 初始化每个 epoch 的总损失
+        epoch_total_loss = 0.0
+        epoch_total_spectrum_loss = 0.0
+        epoch_total_metrics_loss = 0.0
         
+        # 初始化用于 log_interval 批次内的累积损失
+        batch_accum_loss = 0.0
+        batch_accum_spectrum_loss = 0.0
+        batch_accum_metrics_loss = 0.0
+
         # 使用 tqdm 包装 dataloader，显示进度条
-        # leave=True 会让进度条在完成后保留在屏幕上，以便查看每个Epoch的最终信息
-        # 如果你希望每个Epoch完成后进度条消失，可以将 leave=True 改为 leave=False
-        progress_bar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=True) 
+        # 尝试 leave=False，如果仍不显示，再改回 leave=True
+        progress_bar = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) 
         
         for i, (real_spectrum, _, real_params_norm, _, real_metrics_norm) in enumerate(progress_bar):
             # 将数据移动到指定设备
@@ -82,28 +85,37 @@ def pretrain_forward_model(forward_model: ForwardModel, dataloader: DataLoader, 
             loss.backward()
             optimizer.step()
 
-            # 累积损失以便计算平均值
-            total_loss += loss.item()
-            total_spectrum_loss += loss_spectrum.item()
-            total_metrics_loss += loss_metrics.item()
+            # 累积损失以便计算 epoch 平均值
+            epoch_total_loss += loss.item()
+            epoch_total_spectrum_loss += loss_spectrum.item()
+            epoch_total_metrics_loss += loss_metrics.item()
+
+            # 累积用于 log_interval 批次内的损失
+            batch_accum_loss += loss.item()
+            batch_accum_spectrum_loss += loss_spectrum.item()
+            batch_accum_metrics_loss += loss_metrics.item()
 
             # <<<<<<< 关键修改：每隔 log_interval 批次更新进度条后缀信息 >>>>>>>
             if (i + 1) % log_interval == 0:
                 # 计算过去 log_interval 批次的平均损失
-                current_avg_loss = total_loss / (i + 1)
-                current_avg_spectrum_loss = total_spectrum_loss / (i + 1)
-                current_avg_metrics_loss = total_metrics_loss / (i + 1)
+                current_avg_loss = batch_accum_loss / log_interval
+                current_avg_spectrum_loss = batch_accum_spectrum_loss / log_interval
+                current_avg_metrics_loss = batch_accum_metrics_loss / log_interval
 
                 progress_bar.set_postfix(
-                    Avg_Loss=f"{current_avg_loss:.4f}", 
-                    Avg_SpecLoss=f"{current_avg_spectrum_loss:.4f}", 
-                    Avg_MetricsLoss=f"{current_avg_metrics_loss:.4f}"
+                    Loss=f"{current_avg_loss:.4f}", 
+                    SpecLoss=f"{current_avg_spectrum_loss:.4f}", 
+                    MetricsLoss=f"{current_avg_metrics_loss:.4f}"
                 )
+                # 重置批次累积损失
+                batch_accum_loss = 0.0
+                batch_accum_spectrum_loss = 0.0
+                batch_accum_metrics_loss = 0.0
         
         # 每个 epoch 结束时的最终平均损失
-        avg_epoch_loss = total_loss / len(dataloader)
-        avg_epoch_spectrum_loss = total_spectrum_loss / len(dataloader)
-        avg_epoch_metrics_loss = total_metrics_loss / len(dataloader)
+        avg_epoch_loss = epoch_total_loss / len(dataloader)
+        avg_epoch_spectrum_loss = epoch_total_spectrum_loss / len(dataloader)
+        avg_epoch_metrics_loss = epoch_total_metrics_loss / len(dataloader)
         epoch_losses.append(avg_epoch_loss) # 记录每个 epoch 的总平均损失
 
         # 使用 tqdm.write 确保在进度条下方打印信息，避免被覆盖
@@ -116,14 +128,14 @@ def pretrain_forward_model(forward_model: ForwardModel, dataloader: DataLoader, 
     os.makedirs(cfg.SAVED_MODELS_DIR, exist_ok=True)
     fwd_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_pretrained.pth")
     torch.save(forward_model.state_dict(), fwd_model_path)
-    print(f"\n预训练的前向模型已保存到 {fwd_model_path}")
-    print("--- 前向模型预训练完成 ---")
+    tqdm.write(f"\n预训练的前向模型已保存到 {fwd_model_path}") # <<<<< 使用 tqdm.write
+    tqdm.write("--- 前向模型预训练完成 ---") # <<<<< 使用 tqdm.write
 
     # 保存损失历史，以便后续评估脚本使用
     loss_history_path = os.path.join(cfg.SAVED_MODELS_DIR, "fwd_pretrain_loss_history.pt")
     # 封装在字典中，以 'train_losses' 为键，兼容评估脚本
     torch.save({'train_losses': epoch_losses}, loss_history_path) 
-    print(f"前向模型预训练损失历史已保存到 {loss_history_path}")
+    tqdm.write(f"前向模型预训练损失历史已保存到 {loss_history_path}") # <<<<< 使用 tqdm.write
 
     return epoch_losses # 返回记录的损失列表
 
@@ -140,16 +152,14 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-    print("--- 正在启动前向模型预训练脚本 ---")
-    print(f"参数: {args}")
+    tqdm.write("--- 正在启动前向模型预训练脚本 ---") # <<<<< 使用 tqdm.write
+    tqdm.write(f"参数: {args}") # <<<<< 使用 tqdm.write
 
     # 设置设备
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"正在使用设备: {device}")
-
-    # 设置随机种子
+    tqdm.write(f"正在使用设备: {device}") # <<<<< 使用 tqdm.write
     set_seed(cfg.RANDOM_SEED)
-    print(f"随机种子已设置为: {cfg.RANDOM_SEED}")
+    tqdm.write(f"随机种子已设置为: {cfg.RANDOM_SEED}") # <<<<< 使用 tqdm.write
 
     # --- 数据加载 ---
     # 确保创建必要的目录，包括 plots 目录
@@ -157,7 +167,7 @@ if __name__ == "__main__":
 
     data_path = cfg.DATASET_PATH
     if not os.path.exists(data_path):
-        print(f"错误: 数据集未找到，路径为 {data_path}。请检查 config.py 并确保 CSV 文件存在。")
+        tqdm.write(f"错误: 数据集未找到，路径为 {data_path}。请检查 config.py 并确保 CSV 文件存在。") # <<<<< 使用 tqdm.write
         sys.exit(1) # 使用 sys.exit(1) 更明确地表示错误退出
 
     dataset = MetamaterialDataset(data_path=data_path, num_points_per_sample=cfg.SPECTRUM_DIM)
@@ -168,8 +178,8 @@ if __name__ == "__main__":
         num_workers=cfg.NUM_WORKERS,
         pin_memory=True
     )
-    print(f"数据集大小: {len(dataset)} 个样本")
-    print(f"批次数量: {len(dataloader)}")
+    tqdm.write(f"数据集大小: {len(dataset)} 个样本") # <<<<< 使用 tqdm.write
+    tqdm.write(f"批次数量: {len(dataloader)}") # <<<<< 使用 tqdm.write
 
     # --- 模型初始化 ---
     forward_model = ForwardModel(
@@ -178,7 +188,7 @@ if __name__ == "__main__":
         output_metrics_dim=cfg.FORWARD_MODEL_OUTPUT_METRICS_DIM
     ).to(device)
 
-    print(f"ForwardModel 架构:\n{forward_model}")
+    tqdm.write(f"ForwardModel 架构:\n{forward_model}") # <<<<< 使用 tqdm.write
 
     # --- 调用预训练函数 ---
     pretrain_forward_model(
@@ -190,4 +200,4 @@ if __name__ == "__main__":
         log_interval=args.log_interval # <<<<< 传入新的 log_interval 参数
     )
 
-    print("--- 前向模型预训练脚本已完成 ---")
+    tqdm.write("--- 前向模型预训练脚本已完成 ---") # <<<<< 使用 tqdm.write

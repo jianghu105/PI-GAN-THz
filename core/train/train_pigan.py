@@ -1,5 +1,3 @@
-# PI_GAN_THZ/core/train/train_pigan.py
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -46,11 +44,11 @@ def train_pigan(dataloader: DataLoader, device: torch.device,
         forward_model (ForwardModel): 前向仿真模型实例 (已预训练)。
         dataset (MetamaterialDataset): 数据集实例，用于访问参数和指标的归一化范围。
         num_epochs (int): 训练的 epoch 数量。
-        log_interval (int): 每隔多少批次输出一次详细日志。
+        log_interval (int): 每隔多少批次输出一次详细日志和更新进度条后缀。
     Returns:
         dict: 包含所有损失历史的字典。
     """
-    print("\n--- 正在启动 PI-GAN 训练 ---")
+    tqdm.write("\n--- 正在启动 PI-GAN 训练 ---") # 使用 tqdm.write
 
     # 定义优化器
     optimizer_g = optim.Adam(generator.parameters(), lr=cfg.LR_G, betas=(0.5, 0.999))
@@ -81,19 +79,24 @@ def train_pigan(dataloader: DataLoader, device: torch.device,
     # 训练循环
     for epoch in range(num_epochs):
         # 初始化每个 epoch 的总损失
-        total_d_loss = 0.0
-        total_g_loss = 0.0
-        total_adv_loss = 0.0
-        total_recon_loss_spec = 0.0
-        total_recon_loss_metrics = 0.0
-        total_maxwell_loss = 0.0
-        total_lc_loss = 0.0
-        total_param_range_loss = 0.0
-        total_bnn_kl_loss = 0.0
+        epoch_total_d_loss = 0.0
+        epoch_total_g_loss = 0.0
+        epoch_total_adv_loss = 0.0
+        epoch_total_recon_loss_spec = 0.0
+        epoch_total_recon_loss_metrics = 0.0
+        epoch_total_maxwell_loss = 0.0
+        epoch_total_lc_loss = 0.0
+        epoch_total_param_range_loss = 0.0
+        epoch_total_bnn_kl_loss = 0.0
+
+        # 初始化用于 log_interval 批次内的累积损失
+        batch_accum_d_loss = 0.0
+        batch_accum_g_loss = 0.0
+        batch_accum_adv_loss = 0.0
 
         # Wrap dataloader with tqdm for a progress bar
-        # leave=True 会让进度条在完成后保留在屏幕上
-        data_iterator = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=True)
+        # 尝试 leave=False，如果 still 不显示，再改回 leave=True
+        data_iterator = tqdm(dataloader, desc=f"Epoch {epoch+1}/{num_epochs}", leave=False) 
 
         for i, (real_spectrum, real_params_denorm, real_params_norm, real_metrics_denorm, real_metrics_norm) in enumerate(data_iterator):
             current_batch_size = real_spectrum.size(0)
@@ -107,12 +110,10 @@ def train_pigan(dataloader: DataLoader, device: torch.device,
             # --- Train Discriminator (D) ---
             optimizer_d.zero_grad()
 
-            # 1. D's output on real data pairs (spectrum, real parameters)
             real_labels = torch.ones(current_batch_size, 1).to(device)
             output_real = discriminator(real_spectrum, real_params_denorm)
             loss_d_real = bce_criterion(output_real, real_labels)
 
-            # 2. D's output on generated data pairs (spectrum, fake parameters)
             predicted_params_norm = generator(real_spectrum)
             predicted_params_denorm_for_d = denormalize_params(predicted_params_norm.detach(), dataset.param_ranges)
 
@@ -163,40 +164,49 @@ def train_pigan(dataloader: DataLoader, device: torch.device,
             loss_g_total.backward()
             optimizer_g.step()
 
-            # Record losses for current batch
-            total_d_loss += loss_d.item()
-            total_g_loss += loss_g_total.item()
-            total_adv_loss += loss_g_adv.item()
-            total_recon_loss_spec += loss_recon_spec.item()
-            total_recon_loss_metrics += loss_recon_metrics.item()
-            total_maxwell_loss += loss_maxwell.item()
-            total_lc_loss += loss_lc.item()
-            total_param_range_loss += loss_param_range.item()
-            total_bnn_kl_loss += loss_bnn_kl.item()
+            # 累积当前批次的损失，用于计算 epoch 平均损失和 log_interval 期间的平均损失
+            epoch_total_d_loss += loss_d.item()
+            epoch_total_g_loss += loss_g_total.item()
+            epoch_total_adv_loss += loss_g_adv.item()
+            epoch_total_recon_loss_spec += loss_recon_spec.item()
+            epoch_total_recon_loss_metrics += loss_recon_metrics.item()
+            epoch_total_maxwell_loss += loss_maxwell.item()
+            epoch_total_lc_loss += loss_lc.item()
+            epoch_total_param_range_loss += loss_param_range.item()
+            epoch_total_bnn_kl_loss += loss_bnn_kl.item()
+
+            # 累积用于 log_interval 批次内的损失
+            batch_accum_d_loss += loss_d.item()
+            batch_accum_g_loss += loss_g_total.item()
+            batch_accum_adv_loss += loss_g_adv.item()
 
             # <<<<<<< 关键修改：每隔 log_interval 批次更新进度条后缀信息 >>>>>>>
             if (i + 1) % log_interval == 0:
                 # 计算过去 log_interval 批次的平均损失
-                current_avg_d_loss = total_d_loss / (i + 1)
-                current_avg_g_loss = total_g_loss / (i + 1)
-                current_avg_adv_loss = total_adv_loss / (i + 1)
+                current_avg_d_loss = batch_accum_d_loss / log_interval
+                current_avg_g_loss = batch_accum_g_loss / log_interval
+                current_avg_adv_loss = batch_accum_adv_loss / log_interval
 
                 data_iterator.set_postfix(
-                    Avg_D_Loss=f"{current_avg_d_loss:.4f}",
-                    Avg_G_Loss=f"{current_avg_g_loss:.4f}",
-                    Avg_Adv=f"{current_avg_adv_loss:.4f}"
+                    D_Loss=f"{current_avg_d_loss:.4f}", # 修改为 Avg_D_Loss 或 D_Loss
+                    G_Loss=f"{current_avg_g_loss:.4f}", # 修改为 Avg_G_Loss 或 G_Loss
+                    Adv=f"{current_avg_adv_loss:.4f}"
                 )
-
+                # 重置批次累积损失
+                batch_accum_d_loss = 0.0
+                batch_accum_g_loss = 0.0
+                batch_accum_adv_loss = 0.0
+        
         # Average losses for the epoch
-        avg_d_loss = total_d_loss / len(dataloader)
-        avg_g_loss = total_g_loss / len(dataloader)
-        avg_adv_loss = total_adv_loss / len(dataloader)
-        avg_recon_loss_spec = total_recon_loss_spec / len(dataloader)
-        avg_recon_loss_metrics = total_recon_loss_metrics / len(dataloader)
-        avg_maxwell_loss = total_maxwell_loss / len(dataloader)
-        avg_lc_loss = total_lc_loss / len(dataloader)
-        avg_param_range_loss = total_param_range_loss / len(dataloader)
-        avg_bnn_kl_loss = total_bnn_kl_loss / len(dataloader)
+        avg_d_loss = epoch_total_d_loss / len(dataloader)
+        avg_g_loss = epoch_total_g_loss / len(dataloader)
+        avg_adv_loss = epoch_total_adv_loss / len(dataloader)
+        avg_recon_loss_spec = epoch_total_recon_loss_spec / len(dataloader)
+        avg_recon_loss_metrics = epoch_total_recon_loss_metrics / len(dataloader)
+        avg_maxwell_loss = epoch_total_maxwell_loss / len(dataloader)
+        avg_lc_loss = epoch_total_lc_loss / len(dataloader)
+        avg_param_range_loss = epoch_total_param_range_loss / len(dataloader)
+        avg_bnn_kl_loss = epoch_total_bnn_kl_loss / len(dataloader)
 
         # <<<<<<< 关键修改：使用 tqdm.write 打印 Epoch 总结 >>>>>>>
         # 只有当达到 cfg.LOG_INTERVAL 的倍数时才记录到 loss_history
@@ -236,19 +246,19 @@ def train_pigan(dataloader: DataLoader, device: torch.device,
             }, checkpoint_path)
             tqdm.write(f"已保存检查点到 {checkpoint_path}") # <<<<< 使用 tqdm.write
 
-    print("--- PI-GAN 训练完成 ---")
+    tqdm.write("--- PI-GAN 训练完成 ---") # <<<<< 使用 tqdm.write
 
     # Save final models after training
     os.makedirs(cfg.SAVED_MODELS_DIR, exist_ok=True)
     torch.save(generator.state_dict(), os.path.join(cfg.SAVED_MODELS_DIR, "generator_final.pth"))
     torch.save(discriminator.state_dict(), os.path.join(cfg.SAVED_MODELS_DIR, "discriminator_final.pth"))
     torch.save(forward_model.state_dict(), os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_final.pth"))
-    print(f"最终模型已保存到 {cfg.SAVED_MODELS_DIR}")
+    tqdm.write(f"最终模型已保存到 {cfg.SAVED_MODELS_DIR}") # <<<<< 使用 tqdm.write
 
     # 保存损失历史，以便后续评估脚本使用
     loss_history_path = os.path.join(cfg.SAVED_MODELS_DIR, "pigan_loss_history.pt")
     torch.save(loss_history, loss_history_path)
-    print(f"PI-GAN 训练损失历史已保存到 {loss_history_path}")
+    tqdm.write(f"PI-GAN 训练损失历史已保存到 {loss_history_path}") # <<<<< 使用 tqdm.write
 
     return loss_history
 
@@ -271,14 +281,14 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
 
-    print("--- 正在启动 PI-GAN 直接运行脚本 ---")
-    print(f"参数: {args}")
+    tqdm.write("--- 正在启动 PI-GAN 直接运行脚本 ---") # <<<<< 使用 tqdm.write
+    tqdm.write(f"参数: {args}") # <<<<< 使用 tqdm.write
 
     # 1. 设置设备和随机种子
     device = torch.device(cfg.DEVICE)
-    print(f"正在使用设备: {device}")
+    tqdm.write(f"正在使用设备: {device}") # <<<<< 使用 tqdm.write
     set_seed(cfg.RANDOM_SEED)
-    print(f"随机种子已设置为: {cfg.RANDOM_SEED}")
+    tqdm.write(f"随机种子已设置为: {cfg.RANDOM_SEED}") # <<<<< 使用 tqdm.write
 
     # 2. 创建必要的目录
     cfg.create_directories()
@@ -286,7 +296,7 @@ if __name__ == '__main__':
     # 3. 加载数据
     data_path = cfg.DATASET_PATH
     if not os.path.exists(data_path):
-        print(f"错误: 数据集未找到，路径为 {data_path}。请检查 config.py 并确保 CSV 文件存在。")
+        tqdm.write(f"错误: 数据集未找到，路径为 {data_path}。请检查 config.py 并确保 CSV 文件存在。") # <<<<< 使用 tqdm.write
         sys.exit(1) # 如果数据集缺失则退出
 
     dataset = MetamaterialDataset(data_path=data_path, num_points_per_sample=cfg.SPECTRUM_DIM)
@@ -297,8 +307,8 @@ if __name__ == '__main__':
         num_workers=cfg.NUM_WORKERS,
         pin_memory=True # 使用 pin_memory 以加快数据传输到 GPU
     )
-    print(f"数据集已加载，包含 {len(dataset)} 个样本。")
-    print(f"每个 epoch 的批次数量: {len(dataloader)}")
+    tqdm.write(f"数据集已加载，包含 {len(dataset)} 个样本。") # <<<<< 使用 tqdm.write
+    tqdm.write(f"每个 epoch 的批次数量: {len(dataloader)}") # <<<<< 使用 tqdm.write
 
     # 4. 初始化模型
     generator = Generator(input_dim=cfg.SPECTRUM_DIM, output_dim=cfg.GENERATOR_OUTPUT_PARAM_DIM).to(device)
@@ -308,18 +318,18 @@ if __name__ == '__main__':
                                  output_spectrum_dim=cfg.FORWARD_MODEL_OUTPUT_SPEC_DIM,
                                  output_metrics_dim=cfg.FORWARD_MODEL_OUTPUT_METRICS_DIM).to(device)
     
-    print(f"生成器架构:\n{generator}")
-    print(f"判别器架构:\n{discriminator}")
-    print(f"前向模型架构:\n{forward_model}")
+    tqdm.write(f"生成器架构:\n{generator}") # <<<<< 使用 tqdm.write
+    tqdm.write(f"判别器架构:\n{discriminator}") # <<<<< 使用 tqdm.write
+    tqdm.write(f"前向模型架构:\n{forward_model}") # <<<<< 使用 tqdm.write
 
     # 5. 加载预训练的前向模型权重
     fwd_model_path = args.fwd_model_path
     if os.path.exists(fwd_model_path):
-        print(f"正在从 {fwd_model_path} 加载预训练的前向模型...")
+        tqdm.write(f"正在从 {fwd_model_path} 加载预训练的前向模型...") # <<<<< 使用 tqdm.write
         forward_model.load_state_dict(torch.load(fwd_model_path, map_location=device))
     else:
-        print(f"错误: 预训练的前向模型未找到，路径为 {fwd_model_path}。")
-        print("请确保已首先运行 'pretrain_fwd_model.py'，或指定正确的路径。")
+        tqdm.write(f"错误: 预训练的前向模型未找到，路径为 {fwd_model_path}。") # <<<<< 使用 tqdm.write
+        tqdm.write("请确保已首先运行 'pretrain_fwd_model.py'，或指定正确的路径。") # <<<<< 使用 tqdm.write
         sys.exit(1) # 如果预训练模型缺失则退出
 
     # 6. 调用训练函数
@@ -334,4 +344,4 @@ if __name__ == '__main__':
         log_interval=args.log_interval # <<<<< 传入新的 log_interval 参数
     )
 
-    print("\n--- PI-GAN 直接运行脚本已完成 ---")
+    tqdm.write("\n--- PI-GAN 直接运行脚本已完成 ---") # <<<<< 使用 tqdm.write

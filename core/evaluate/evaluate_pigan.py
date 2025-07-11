@@ -4,13 +4,14 @@ import torch
 import numpy as np
 import argparse
 from torch.utils.data import DataLoader 
+from tqdm.notebook import tqdm # Import tqdm.notebook for Colab compatibility
 
-# 将项目根目录添加到 Python 路径
+# Add the project root to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-# 导入模型、数据加载器和绘图工具
+# Import models, data loader, and plotting utilities
 from core.models.generator import Generator
 from core.models.discriminator import Discriminator
 from core.models.forward_model import ForwardModel
@@ -21,37 +22,37 @@ from core.utils.set_seed import set_seed
 
 def evaluate_pigan(num_samples_to_plot: int = 5):
     """
-    评估和可视化 PI-GAN 的训练结果。
+    Evaluates and visualizes the training results of the PI-GAN.
+
     Args:
-        num_samples_to_plot (int): 要可视化生成样本的图片数量。
+        num_samples_to_plot (int): Number of generated samples to visualize.
     """
-    print("\n--- 正在启动 PI-GAN 评估脚本 ---")
+    tqdm.write("\n--- Starting PI-GAN Evaluation Script ---") # <<<<< Use tqdm.write
 
-    # 设置设备
+    # Set device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"正在使用设备: {device}")
+    tqdm.write(f"Using device: {device}") # <<<<< Use tqdm.write
 
-    # 设置随机种子，确保结果可复现
+    # Set random seed for reproducibility
     set_seed(cfg.RANDOM_SEED)
-    print(f"随机种子已设置为: {cfg.RANDOM_SEED}")
+    tqdm.write(f"Random seed set to: {cfg.RANDOM_SEED}") # <<<<< Use tqdm.write
 
-    # 确保创建必要的目录，包括 plots 目录
+    # Ensure necessary directories are created, including plots directory
     cfg.create_directories() 
-    print(f"评估图像将保存到: {cfg.PLOTS_DIR}")
+    tqdm.write(f"Evaluation plots will be saved to: {cfg.PLOTS_DIR}") # <<<<< Use tqdm.write
 
-    # --- 数据加载 ---
+    # --- Data Loading ---
     data_path = cfg.DATASET_PATH
     if not os.path.exists(data_path):
-        print(f"错误: 数据集未找到，路径为 {data_path}。请检查 config.py 并确保 CSV 文件存在。")
-        # 在 Colab 中，sys.exit(1) 会立即终止单元格执行，可能看不到错误。
-        # 为了调试，改为 return 并打印错误。
+        tqdm.write(f"Error: Dataset not found at {data_path}. Please check config.py and ensure the CSV file exists.") # <<<<< Use tqdm.write
         return 
     
-    # 注意：评估 PI-GAN 通常直接从数据集中取样，而不是通过 DataLoader 进行批处理循环。
+    # Note: Evaluating PI-GAN usually involves sampling directly from the dataset, 
+    # rather than iterating through a DataLoader in batches for the entire dataset.
     dataset = MetamaterialDataset(data_path=data_path, num_points_per_sample=cfg.SPECTRUM_DIM)
-    print(f"数据集大小: {len(dataset)} 个样本")
+    tqdm.write(f"Dataset size: {len(dataset)} samples") # <<<<< Use tqdm.write
 
-    # --- 模型初始化和加载 ---
+    # --- Model Initialization and Loading ---
     generator = Generator(input_dim=cfg.SPECTRUM_DIM, output_dim=cfg.GENERATOR_OUTPUT_PARAM_DIM).to(device)
     discriminator = Discriminator(input_spec_dim=cfg.DISCRIMINATOR_INPUT_SPEC_DIM, 
                                   input_param_dim=cfg.DISCRIMINATOR_INPUT_PARAM_DIM).to(device)
@@ -59,81 +60,79 @@ def evaluate_pigan(num_samples_to_plot: int = 5):
                                  output_spectrum_dim=cfg.FORWARD_MODEL_OUTPUT_SPEC_DIM,
                                  output_metrics_dim=cfg.FORWARD_MODEL_OUTPUT_METRICS_DIM).to(device)
     
-    # 构造模型文件路径
+    # Construct model file paths
     gen_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "generator_final.pth")
     disc_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "discriminator_final.pth")
-    # 假设前向模型在 PI-GAN 训练后也保存为 final 版本，如果不是，请使用 pretrain 版本
+    # Assuming the forward model is also saved as a final version after PI-GAN training.
+    # If not, use the pre-trained version path (e.g., "forward_model_pretrained.pth")
     fwd_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_final.pth") 
 
-    # 检查所有模型文件是否存在
+    # Check if all model files exist
     models_found = True
     if not os.path.exists(gen_model_path):
-        print(f"错误: Generator 模型未找到在 {gen_model_path}。")
+        tqdm.write(f"Error: Generator model not found at {gen_model_path}.") # <<<<< Use tqdm.write
         models_found = False
     if not os.path.exists(disc_model_path):
-        print(f"错误: Discriminator 模型未找到在 {disc_model_path}。")
+        tqdm.write(f"Error: Discriminator model not found at {disc_model_path}.") # <<<<< Use tqdm.write
         models_found = False
     if not os.path.exists(fwd_model_path):
-        print(f"错误: ForwardModel 模型未找到在 {fwd_model_path}。")
+        tqdm.write(f"Error: ForwardModel model not found at {fwd_model_path}.") # <<<<< Use tqdm.write
         models_found = False
     
     if not models_found:
-        print("请确保 PI-GAN 训练已完成并保存了所有模型，或指定正确的路径。")
-        return # 如果有模型缺失，优雅地返回
+        tqdm.write("Please ensure PI-GAN training is complete and all models are saved, or specify correct paths.") # <<<<< Use tqdm.write
+        return # Gracefully return if any model is missing
 
     try:
         generator.load_state_dict(torch.load(gen_model_path, map_location=device))
         discriminator.load_state_dict(torch.load(disc_model_path, map_location=device))
-        forward_model.load_state_dict(torch.load(fwd_model_path, map_location=device)) # 加载前向模型权重
+        forward_model.load_state_dict(torch.load(fwd_model_path, map_location=device)) # Load forward model weights
     except Exception as e:
-        print(f"错误: 加载模型时发生异常: {e}")
-        print("请检查模型文件是否损坏或与模型架构不匹配。")
+        tqdm.write(f"Error: An exception occurred while loading models: {e}") # <<<<< Use tqdm.write
+        tqdm.write("Please check if model files are corrupted or do not match the model architecture.") # <<<<< Use tqdm.write
         return
 
-    generator.eval() # 切换到评估模式
-    discriminator.eval() # 切换到评估模式
-    forward_model.eval() # 切换到评估模式
-    print(f"已从 {cfg.SAVED_MODELS_DIR} 加载最终 Generator, Discriminator 和 ForwardModel。")
+    generator.eval() # Switch to evaluation mode
+    discriminator.eval() # Switch to evaluation mode
+    forward_model.eval() # Switch to evaluation mode
+    tqdm.write(f"Final Generator, Discriminator, and ForwardModel loaded from {cfg.SAVED_MODELS_DIR}.") # <<<<< Use tqdm.write
 
-    # --- 加载损失历史 ---
+    # --- Load Loss History ---
     loss_history_path = os.path.join(cfg.SAVED_MODELS_DIR, "pigan_loss_history.pt")
     if not os.path.exists(loss_history_path):
-        print(f"警告: PI-GAN 训练损失历史未找到，路径为 {loss_history_path}。无法生成损失图。")
+        tqdm.write(f"Warning: PI-GAN training loss history not found at {loss_history_path}. Cannot generate loss plots.") # <<<<< Use tqdm.write
         loss_history = {}
     else:
         try:
-            # 假设 pigan_loss_history.pt 保存的是一个字典，包含各种损失列表
+            # Assuming pigan_loss_history.pt saves a dictionary containing various loss lists
             loaded_history = torch.load(loss_history_path)
-            # 检查关键键是否存在
+            # Check for required keys
             required_keys = ['g_losses', 'd_losses', 'adv_losses', 'recon_spec_losses', 
                              'recon_metrics_losses', 'maxwell_losses', 'lc_losses', 
                              'param_range_losses', 'bnn_kl_losses']
             
             if isinstance(loaded_history, dict) and all(k in loaded_history for k in required_keys):
                 loss_history = loaded_history
-                print(f"已从 {loss_history_path} 加载 PI-GAN 训练损失历史。")
+                tqdm.write(f"PI-GAN training loss history loaded from {loss_history_path}.") # <<<<< Use tqdm.write
             else:
-                print(f"警告: 损失历史文件 {loss_history_path} 格式不正确或缺少关键数据。无法生成损失图。")
+                tqdm.write(f"Warning: Loss history file {loss_history_path} has incorrect format or missing key data. Cannot generate loss plots.") # <<<<< Use tqdm.write
                 loss_history = {}
         except Exception as e:
-            print(f"错误: 加载损失历史时发生异常: {e}。无法生成损失图。")
+            tqdm.write(f"Error: An exception occurred while loading loss history: {e}. Cannot generate loss plots.") # <<<<< Use tqdm.write
             loss_history = {}
 
-    # --- 绘制损失曲线 ---
-    # 确保每个损失列表都不为空，且 epoch_for_plot 长度与损失列表匹配
+    # --- Plot Loss Curves ---
+    # Ensure each loss list is not empty and epoch_for_plot length matches loss list
     if loss_history and 'g_losses' in loss_history and loss_history['g_losses']:
-        # 假设 loss_history 中的列表长度一致
+        # Assuming loss_history lists have consistent length
         epochs_for_plot = list(range(1, len(loss_history['g_losses']) + 1)) 
-        # 如果LOG_INTERVAL在训练时用于记录，你也可以根据需要调整epochs_for_plot
-        # 例如：epochs_for_plot = [(i + 1) * cfg.LOG_INTERVAL for i in range(len(loss_history['g_losses']))]
-        # 但通常对于损失曲线，直接使用 epoch 数更常见
-
-        print("\n--- 正在生成 PI-GAN 训练损失图 ---")
-        # 绘制总损失
+        
+        tqdm.write("\n--- Generating PI-GAN Training Loss Plots ---") # <<<<< Use tqdm.write
+        # Plot total losses
         plot_losses(
             epochs=epochs_for_plot,
             losses={
-                '生成器损失': loss_history.get('g_losses', []), # 使用 .get 防止键不存在
+                '生成器损失': loss_history.get('g_losses', []), # Use .get to prevent KeyError
                 '判别器损失': loss_history.get('d_losses', [])
             },
             title='生成器和判别器损失随 Epoch 变化',
@@ -141,9 +140,8 @@ def evaluate_pigan(num_samples_to_plot: int = 5):
             ylabel='损失',
             save_path=os.path.join(cfg.PLOTS_DIR, 'pigan_gan_losses.png')
         )
-        
-
-        # 绘制生成器各子损失
+        # Image of PI-GAN GAN losses
+        # Plot generator sub-losses
         plot_losses(
             epochs=epochs_for_plot,
             losses={
@@ -160,55 +158,53 @@ def evaluate_pigan(num_samples_to_plot: int = 5):
             ylabel='损失',
             save_path=os.path.join(cfg.PLOTS_DIR, 'pigan_generator_sub_losses.png')
         )
-        
-        print(f"损失图已保存到 {cfg.PLOTS_DIR}")
+        # Image of PI-GAN generator sub-losses
+        tqdm.write(f"Loss plots saved to {cfg.PLOTS_DIR}") # <<<<< Use tqdm.write
     else:
-        print("没有可用于绘制的损失历史数据。")
+        tqdm.write("No valid loss history data available for plotting.") # <<<<< Use tqdm.write
 
-    # --- 生成样本可视化 ---
-    print("\n--- 正在生成 PI-GAN 样本可视化 ---")
+    # --- Generate Sample Visualization ---
+    tqdm.write("\n--- Generating PI-GAN Sample Visualization ---") # <<<<< Use tqdm.write
     with torch.no_grad():
         if num_samples_to_plot <= 0:
-            print("警告: 要绘制的样本数量为0或负数，跳过生成样本可视化。")
+            tqdm.write("Warning: Number of samples to plot is 0 or negative, skipping sample visualization.") # <<<<< Use tqdm.write
             
         elif num_samples_to_plot > len(dataset):
-            print(f"警告: 要绘制的样本数量 ({num_samples_to_plot}) 超过数据集大小 ({len(dataset)})。将绘制所有 {len(dataset)} 个样本。")
+            tqdm.write(f"Warning: Number of samples to plot ({num_samples_to_plot}) exceeds dataset size ({len(dataset)}). Plotting all {len(dataset)} samples.") # <<<<< Use tqdm.write
             num_samples_to_plot = len(dataset)
         
-        if num_samples_to_plot == 0: # 再次检查，如果调整后为0则退出
-            print("没有足够的样本用于生成可视化。")
+        if num_samples_to_plot == 0: # Re-check if adjusted to 0
+            tqdm.write("Not enough samples available for generating visualization.") # <<<<< Use tqdm.write
             
         else:
-            # 随机选择一批真实光谱进行生成和可视化
-            # ensure replace=False to avoid duplicate samples
+            # Randomly select a batch of real spectra for generation and visualization
             sample_indices = np.random.choice(len(dataset), num_samples_to_plot, replace=False) 
             
-            # 使用 DataLoader 来高效地获取这些样本，即使是单个批次也推荐
+            # Use DataLoader to efficiently get these samples, even for a single batch
             from torch.utils.data import Subset
             subset_dataset = Subset(dataset, sample_indices)
             sample_dataloader = DataLoader(subset_dataset, batch_size=num_samples_to_plot, shuffle=False)
             
-            # 从 dataloader 中获取第一个（也是唯一的）批次
-            # real_spectrum, real_params_denorm, real_params_norm, real_metrics_denorm, real_metrics_norm
+            # Get the first (and only) batch from the dataloader
             sample_batch = next(iter(sample_dataloader)) 
             
             sample_real_spectrums = sample_batch[0].to(device)
-            sample_real_params_denorm = sample_batch[1].to(device) # 真实未归一化参数
+            sample_real_params_denorm = sample_batch[1].to(device) # Real unnormalized parameters
 
-            # 通过生成器预测参数
+            # Predict parameters via the Generator
             sample_predicted_params_norm = generator(sample_real_spectrums)
             sample_predicted_params_denorm = denormalize_params(sample_predicted_params_norm, dataset.param_ranges)
 
-            # 通过前向模型重构光谱 (用于循环一致性检查)
+            # Reconstruct spectra via the Forward Model (for cycle consistency check)
             recon_spectrums, _ = forward_model(sample_predicted_params_norm)
 
-            # 将张量移动回CPU并转换为NumPy以便绘图
+            # Move tensors back to CPU and convert to NumPy for plotting
             sample_real_spectrums_np = sample_real_spectrums.cpu().numpy()
             recon_spectrums_np = recon_spectrums.cpu().numpy()
             sample_real_params_denorm_np = sample_real_params_denorm.cpu().numpy()
             sample_predicted_params_denorm_np = sample_predicted_params_denorm.cpu().numpy()
             
-            frequencies = dataset.frequencies # 从 MetamaterialDataset 中获取频率
+            frequencies = dataset.frequencies # Get frequencies from MetamaterialDataset
 
             plot_generated_samples(
                 real_spectrums=sample_real_spectrums_np,
@@ -219,15 +215,15 @@ def evaluate_pigan(num_samples_to_plot: int = 5):
                 num_samples=num_samples_to_plot,
                 save_path=os.path.join(cfg.PLOTS_DIR, 'pigan_generated_samples.png')
             )
-            
-            print(f"PI-GAN 样本图已保存到 {cfg.PLOTS_DIR}")
+            # Image of PI-GAN generated samples
+            tqdm.write(f"PI-GAN sample plot saved to {cfg.PLOTS_DIR}") # <<<<< Use tqdm.write
     
-    print("--- PI-GAN 评估脚本已完成 ---")
+    tqdm.write("--- PI-GAN Evaluation Script Completed ---") # <<<<< Use tqdm.write
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="评估已训练的 PI-GAN 模型。")
+    parser = argparse.ArgumentParser(description="Evaluate a trained PI-GAN model.")
     parser.add_argument('--num_samples', type=int, default=5,
-                        help='要可视化绘制的样本数量 (默认: 5)')
+                        help='Number of samples to visualize (default: 5)')
     args = parser.parse_args()
     
     evaluate_pigan(num_samples_to_plot=args.num_samples)
