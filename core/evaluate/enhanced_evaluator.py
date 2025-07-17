@@ -258,4 +258,321 @@ class EnhancedEvaluator:
                 'real_metrics': all_real_metrics,
                 'pred_metrics': all_pred_metrics
             }
-        }\n        \n        print(f\"Generator evaluation completed with {len(all_real_params)} samples\")\n        return results\n    \n    def evaluate_discriminator(self, num_samples: int = 1000) -> Dict[str, Any]:\n        \"\"\"\n        评估判别器性能\n        \n        Args:\n            num_samples: 评估样本数\n            \n        Returns:\n            Dict[str, Any]: 评估结果\n        \"\"\"\n        print(f\"Evaluating Discriminator with {num_samples} samples...\")\n        \n        if self.discriminator is None or self.generator is None or self.dataset is None:\n            raise ValueError(\"Models and dataset must be loaded first!\")\n        \n        # 随机采样\n        sample_indices = np.random.choice(len(self.dataset), min(num_samples, len(self.dataset)), replace=False)\n        subset = Subset(self.dataset, sample_indices)\n        dataloader = DataLoader(subset, batch_size=64, shuffle=False)\n        \n        all_real_scores = []\n        all_fake_scores = []\n        bce_criterion = criterion_bce()\n        \n        with torch.no_grad():\n            for batch in dataloader:\n                real_spectrum, real_params_denorm, real_params_norm, _, _ = batch\n                \n                real_spectrum = real_spectrum.to(self.device)\n                real_params_denorm = real_params_denorm.to(self.device)\n                real_params_norm = real_params_norm.to(self.device)\n                \n                batch_size = real_spectrum.size(0)\n                \n                # 真实样本评分\n                real_scores = self.discriminator(real_spectrum, real_params_denorm)\n                all_real_scores.append(real_scores.cpu().numpy())\n                \n                # 生成假样本\n                fake_params_norm = self.generator(real_spectrum)\n                fake_params_denorm = denormalize_params(fake_params_norm, self.dataset.param_ranges)\n                \n                # 假样本评分\n                fake_scores = self.discriminator(real_spectrum, fake_params_denorm)\n                all_fake_scores.append(fake_scores.cpu().numpy())\n        \n        # 合并结果\n        all_real_scores = np.concatenate(all_real_scores, axis=0)\n        all_fake_scores = np.concatenate(all_fake_scores, axis=0)\n        \n        # 计算判别器性能指标\n        real_labels = np.ones_like(all_real_scores)\n        fake_labels = np.zeros_like(all_fake_scores)\n        \n        # 准确率计算\n        real_accuracy = np.mean(all_real_scores > 0.5)\n        fake_accuracy = np.mean(all_fake_scores < 0.5)\n        overall_accuracy = (real_accuracy + fake_accuracy) / 2\n        \n        # 损失计算\n        real_loss = -np.mean(np.log(all_real_scores + 1e-8))\n        fake_loss = -np.mean(np.log(1 - all_fake_scores + 1e-8))\n        total_loss = real_loss + fake_loss\n        \n        results = {\n            'real_accuracy': real_accuracy,\n            'fake_accuracy': fake_accuracy,\n            'overall_accuracy': overall_accuracy,\n            'real_loss': real_loss,\n            'fake_loss': fake_loss,\n            'total_loss': total_loss,\n            'real_score_mean': np.mean(all_real_scores),\n            'fake_score_mean': np.mean(all_fake_scores),\n            'real_score_std': np.std(all_real_scores),\n            'fake_score_std': np.std(all_fake_scores),\n            'num_samples': len(all_real_scores)\n        }\n        \n        print(f\"Discriminator evaluation completed with {len(all_real_scores)} samples\")\n        return results\n    \n    def evaluate_physics_consistency(self, num_samples: int = 1000) -> Dict[str, Any]:\n        \"\"\"\n        评估物理一致性\n        \n        Args:\n            num_samples: 评估样本数\n            \n        Returns:\n            Dict[str, Any]: 物理一致性评估结果\n        \"\"\"\n        print(f\"Evaluating Physics Consistency with {num_samples} samples...\")\n        \n        if self.generator is None or self.forward_model is None or self.dataset is None:\n            raise ValueError(\"Models and dataset must be loaded first!\")\n        \n        # 随机采样\n        sample_indices = np.random.choice(len(self.dataset), min(num_samples, len(self.dataset)), replace=False)\n        subset = Subset(self.dataset, sample_indices)\n        dataloader = DataLoader(subset, batch_size=64, shuffle=False)\n        \n        param_range_violations = []\n        spectrum_smoothness_scores = []\n        frequency_responses = []\n        \n        with torch.no_grad():\n            for batch in dataloader:\n                real_spectrum, _, _, _, _ = batch\n                real_spectrum = real_spectrum.to(self.device)\n                \n                # 生成器预测参数\n                pred_params_norm = self.generator(real_spectrum)\n                \n                # 检查参数范围约束\n                range_violations = torch.sum((pred_params_norm < 0) | (pred_params_norm > 1), dim=1).cpu().numpy()\n                param_range_violations.extend(range_violations)\n                \n                # 前向模型预测\n                pred_spectrum, pred_metrics = self.forward_model(pred_params_norm)\n                \n                # 光谱平滑性评估\n                spectrum_diff = torch.diff(pred_spectrum, dim=1)\n                smoothness = -torch.mean(spectrum_diff ** 2, dim=1).cpu().numpy()\n                spectrum_smoothness_scores.extend(smoothness)\n                \n                # 频率响应分析\n                freq_response = torch.mean(pred_spectrum, dim=1).cpu().numpy()\n                frequency_responses.extend(freq_response)\n        \n        # 统计结果\n        param_range_violations = np.array(param_range_violations)\n        spectrum_smoothness_scores = np.array(spectrum_smoothness_scores)\n        frequency_responses = np.array(frequency_responses)\n        \n        results = {\n            'param_range_violation_rate': np.mean(param_range_violations > 0),\n            'avg_param_violations_per_sample': np.mean(param_range_violations),\n            'spectrum_smoothness_mean': np.mean(spectrum_smoothness_scores),\n            'spectrum_smoothness_std': np.std(spectrum_smoothness_scores),\n            'frequency_response_mean': np.mean(frequency_responses),\n            'frequency_response_std': np.std(frequency_responses),\n            'num_samples': len(param_range_violations)\n        }\n        \n        print(f\"Physics consistency evaluation completed with {len(param_range_violations)} samples\")\n        return results\n    \n    def comprehensive_evaluation(self, num_samples: int = 1000) -> Dict[str, Any]:\n        \"\"\"\n        执行全面评估\n        \n        Args:\n            num_samples: 评估样本数\n            \n        Returns:\n            Dict[str, Any]: 完整评估结果\n        \"\"\"\n        print(\"\\n=== Starting Comprehensive Evaluation ===\")\n        start_time = time.time()\n        \n        # 检查模型和数据集\n        if not all([self.generator, self.discriminator, self.forward_model, self.dataset]):\n            raise ValueError(\"Models and dataset must be loaded first!\")\n        \n        # 执行各项评估\n        results = {\n            'generator_evaluation': self.evaluate_generator(num_samples),\n            'discriminator_evaluation': self.evaluate_discriminator(num_samples),\n            'physics_consistency': self.evaluate_physics_consistency(num_samples),\n            'evaluation_time': time.time() - start_time,\n            'num_samples': num_samples\n        }\n        \n        # 保存结果\n        self.evaluation_results = results\n        \n        print(f\"\\n=== Comprehensive Evaluation Completed in {results['evaluation_time']:.2f}s ===\")\n        return results\n    \n    def save_evaluation_results(self, save_path: str = None) -> None:\n        \"\"\"\n        保存评估结果\n        \n        Args:\n            save_path: 保存路径\n        \"\"\"\n        if save_path is None:\n            save_path = os.path.join(cfg.SAVED_MODELS_DIR, \"evaluation_results.npz\")\n        \n        # 准备保存数据（移除不能序列化的数据）\n        save_data = {}\n        for key, value in self.evaluation_results.items():\n            if key != 'generator_evaluation' or 'data' not in value:\n                save_data[key] = value\n            else:\n                # 保存生成器评估结果但排除原始数据\n                save_data[key] = {k: v for k, v in value.items() if k != 'data'}\n        \n        np.savez(save_path, **save_data)\n        print(f\"Evaluation results saved to: {save_path}\")\n    \n    def generate_report(self, save_path: str = None) -> str:\n        \"\"\"\n        生成评估报告\n        \n        Args:\n            save_path: 报告保存路径\n            \n        Returns:\n            str: 报告内容\n        \"\"\"\n        if not self.evaluation_results:\n            raise ValueError(\"No evaluation results available. Run comprehensive_evaluation first.\")\n        \n        report_lines = []\n        report_lines.append(\"=\" * 80)\n        report_lines.append(\"PI-GAN MODEL EVALUATION REPORT\")\n        report_lines.append(\"=\" * 80)\n        \n        # 基本信息\n        report_lines.append(f\"Evaluation Date: {time.strftime('%Y-%m-%d %H:%M:%S')}\")\n        report_lines.append(f\"Number of Samples: {self.evaluation_results['num_samples']}\")\n        report_lines.append(f\"Evaluation Time: {self.evaluation_results['evaluation_time']:.2f}s\")\n        report_lines.append(\"\")\n        \n        # 生成器评估\n        gen_results = self.evaluation_results['generator_evaluation']\n        report_lines.append(\"1. GENERATOR EVALUATION\")\n        report_lines.append(\"-\" * 40)\n        \n        report_lines.append(\"Parameter Prediction:\")\n        param_metrics = gen_results['parameter_prediction']\n        report_lines.append(f\"  - MSE: {param_metrics['mse']:.6f}\")\n        report_lines.append(f\"  - MAE: {param_metrics['mae']:.6f}\")\n        report_lines.append(f\"  - RMSE: {param_metrics['rmse']:.6f}\")\n        report_lines.append(f\"  - R²: {param_metrics['r2']:.4f}\")\n        report_lines.append(f\"  - Pearson R: {param_metrics['pearson_r']:.4f}\")\n        report_lines.append(f\"  - MAPE: {param_metrics['mape']:.2f}%\")\n        \n        report_lines.append(\"\\nSpectrum Reconstruction:\")\n        spec_metrics = gen_results['spectrum_reconstruction']\n        report_lines.append(f\"  - MSE: {spec_metrics['mse']:.6f}\")\n        report_lines.append(f\"  - MAE: {spec_metrics['mae']:.6f}\")\n        report_lines.append(f\"  - R²: {spec_metrics['r2']:.4f}\")\n        report_lines.append(f\"  - Pearson R: {spec_metrics['pearson_r']:.4f}\")\n        \n        report_lines.append(\"\\nMetrics Prediction:\")\n        metrics_metrics = gen_results['metrics_prediction']\n        report_lines.append(f\"  - MSE: {metrics_metrics['mse']:.6f}\")\n        report_lines.append(f\"  - MAE: {metrics_metrics['mae']:.6f}\")\n        report_lines.append(f\"  - R²: {metrics_metrics['r2']:.4f}\")\n        report_lines.append(f\"  - Pearson R: {metrics_metrics['pearson_r']:.4f}\")\n        report_lines.append(\"\")\n        \n        # 判别器评估\n        disc_results = self.evaluation_results['discriminator_evaluation']\n        report_lines.append(\"2. DISCRIMINATOR EVALUATION\")\n        report_lines.append(\"-\" * 40)\n        report_lines.append(f\"Overall Accuracy: {disc_results['overall_accuracy']:.4f}\")\n        report_lines.append(f\"Real Sample Accuracy: {disc_results['real_accuracy']:.4f}\")\n        report_lines.append(f\"Fake Sample Accuracy: {disc_results['fake_accuracy']:.4f}\")\n        report_lines.append(f\"Total Loss: {disc_results['total_loss']:.6f}\")\n        report_lines.append(f\"Real Score Mean±Std: {disc_results['real_score_mean']:.4f}±{disc_results['real_score_std']:.4f}\")\n        report_lines.append(f\"Fake Score Mean±Std: {disc_results['fake_score_mean']:.4f}±{disc_results['fake_score_std']:.4f}\")\n        report_lines.append(\"\")\n        \n        # 物理一致性评估\n        phys_results = self.evaluation_results['physics_consistency']\n        report_lines.append(\"3. PHYSICS CONSISTENCY EVALUATION\")\n        report_lines.append(\"-\" * 40)\n        report_lines.append(f\"Parameter Range Violation Rate: {phys_results['param_range_violation_rate']:.4f}\")\n        report_lines.append(f\"Average Violations per Sample: {phys_results['avg_param_violations_per_sample']:.4f}\")\n        report_lines.append(f\"Spectrum Smoothness: {phys_results['spectrum_smoothness_mean']:.6f}±{phys_results['spectrum_smoothness_std']:.6f}\")\n        report_lines.append(f\"Frequency Response: {phys_results['frequency_response_mean']:.6f}±{phys_results['frequency_response_std']:.6f}\")\n        report_lines.append(\"\")\n        \n        # 总结\n        report_lines.append(\"4. SUMMARY\")\n        report_lines.append(\"-\" * 40)\n        if param_metrics['r2'] > 0.8:\n            report_lines.append(\"✓ Generator shows GOOD parameter prediction performance\")\n        elif param_metrics['r2'] > 0.6:\n            report_lines.append(\"⚠ Generator shows MODERATE parameter prediction performance\")\n        else:\n            report_lines.append(\"✗ Generator shows POOR parameter prediction performance\")\n        \n        if disc_results['overall_accuracy'] > 0.8:\n            report_lines.append(\"✓ Discriminator shows GOOD discrimination performance\")\n        elif disc_results['overall_accuracy'] > 0.6:\n            report_lines.append(\"⚠ Discriminator shows MODERATE discrimination performance\")\n        else:\n            report_lines.append(\"✗ Discriminator shows POOR discrimination performance\")\n        \n        if phys_results['param_range_violation_rate'] < 0.1:\n            report_lines.append(\"✓ Physics constraints are well satisfied\")\n        elif phys_results['param_range_violation_rate'] < 0.3:\n            report_lines.append(\"⚠ Physics constraints are moderately satisfied\")\n        else:\n            report_lines.append(\"✗ Physics constraints are poorly satisfied\")\n        \n        report_lines.append(\"=\" * 80)\n        \n        report_content = \"\\n\".join(report_lines)\n        \n        # 保存报告\n        if save_path is None:\n            save_path = os.path.join(cfg.SAVED_MODELS_DIR, \"evaluation_report.txt\")\n        \n        with open(save_path, 'w', encoding='utf-8') as f:\n            f.write(report_content)\n        \n        print(f\"Evaluation report saved to: {save_path}\")\n        return report_content
+        }
+        
+        print(f"Generator evaluation completed with {len(all_real_params)} samples")
+        return results
+    
+    def evaluate_discriminator(self, num_samples: int = 1000) -> Dict[str, Any]:
+        """
+        评估判别器性能
+        
+        Args:
+            num_samples: 评估样本数
+            
+        Returns:
+            Dict[str, Any]: 评估结果
+        """
+        print(f"Evaluating Discriminator with {num_samples} samples...")
+        
+        if self.discriminator is None or self.generator is None or self.dataset is None:
+            raise ValueError("Models and dataset must be loaded first!")
+        
+        # 随机采样
+        sample_indices = np.random.choice(len(self.dataset), min(num_samples, len(self.dataset)), replace=False)
+        subset = Subset(self.dataset, sample_indices)
+        dataloader = DataLoader(subset, batch_size=64, shuffle=False)
+        
+        all_real_scores = []
+        all_fake_scores = []
+        bce_criterion = criterion_bce()
+        
+        with torch.no_grad():
+            for batch in dataloader:
+                real_spectrum, real_params_denorm, real_params_norm, _, _ = batch
+                
+                real_spectrum = real_spectrum.to(self.device)
+                real_params_denorm = real_params_denorm.to(self.device)
+                real_params_norm = real_params_norm.to(self.device)
+                
+                batch_size = real_spectrum.size(0)
+                
+                # 真实样本评分
+                real_scores = self.discriminator(real_spectrum, real_params_denorm)
+                all_real_scores.append(real_scores.cpu().numpy())
+                
+                # 生成假样本
+                fake_params_norm = self.generator(real_spectrum)
+                fake_params_denorm = denormalize_params(fake_params_norm, self.dataset.param_ranges)
+                
+                # 假样本评分
+                fake_scores = self.discriminator(real_spectrum, fake_params_denorm)
+                all_fake_scores.append(fake_scores.cpu().numpy())
+        
+        # 合并结果
+        all_real_scores = np.concatenate(all_real_scores, axis=0)
+        all_fake_scores = np.concatenate(all_fake_scores, axis=0)
+        
+        # 计算判别器性能指标
+        real_labels = np.ones_like(all_real_scores)
+        fake_labels = np.zeros_like(all_fake_scores)
+        
+        # 准确率计算
+        real_accuracy = np.mean(all_real_scores > 0.5)
+        fake_accuracy = np.mean(all_fake_scores < 0.5)
+        overall_accuracy = (real_accuracy + fake_accuracy) / 2
+        
+        # 损失计算
+        real_loss = -np.mean(np.log(all_real_scores + 1e-8))
+        fake_loss = -np.mean(np.log(1 - all_fake_scores + 1e-8))
+        total_loss = real_loss + fake_loss
+        
+        results = {
+            'real_accuracy': real_accuracy,
+            'fake_accuracy': fake_accuracy,
+            'overall_accuracy': overall_accuracy,
+            'real_loss': real_loss,
+            'fake_loss': fake_loss,
+            'total_loss': total_loss,
+            'real_score_mean': np.mean(all_real_scores),
+            'fake_score_mean': np.mean(all_fake_scores),
+            'real_score_std': np.std(all_real_scores),
+            'fake_score_std': np.std(all_fake_scores),
+            'num_samples': len(all_real_scores)
+        }
+        
+        print(f"Discriminator evaluation completed with {len(all_real_scores)} samples")
+        return results
+    
+    def evaluate_physics_consistency(self, num_samples: int = 1000) -> Dict[str, Any]:
+        """
+        评估物理一致性
+        
+        Args:
+            num_samples: 评估样本数
+            
+        Returns:
+            Dict[str, Any]: 物理一致性评估结果
+        """
+        print(f"Evaluating Physics Consistency with {num_samples} samples...")
+        
+        if self.generator is None or self.forward_model is None or self.dataset is None:
+            raise ValueError("Models and dataset must be loaded first!")
+        
+        # 随机采样
+        sample_indices = np.random.choice(len(self.dataset), min(num_samples, len(self.dataset)), replace=False)
+        subset = Subset(self.dataset, sample_indices)
+        dataloader = DataLoader(subset, batch_size=64, shuffle=False)
+        
+        param_range_violations = []
+        spectrum_smoothness_scores = []
+        frequency_responses = []
+        
+        with torch.no_grad():
+            for batch in dataloader:
+                real_spectrum, _, _, _, _ = batch
+                real_spectrum = real_spectrum.to(self.device)
+                
+                # 生成器预测参数
+                pred_params_norm = self.generator(real_spectrum)
+                
+                # 检查参数范围约束
+                range_violations = torch.sum((pred_params_norm < 0) | (pred_params_norm > 1), dim=1).cpu().numpy()
+                param_range_violations.extend(range_violations)
+                
+                # 前向模型预测
+                pred_spectrum, pred_metrics = self.forward_model(pred_params_norm)
+                
+                # 光谱平滑性评估
+                spectrum_diff = torch.diff(pred_spectrum, dim=1)
+                smoothness = -torch.mean(spectrum_diff ** 2, dim=1).cpu().numpy()
+                spectrum_smoothness_scores.extend(smoothness)
+                
+                # 频率响应分析
+                freq_response = torch.mean(pred_spectrum, dim=1).cpu().numpy()
+                frequency_responses.extend(freq_response)
+        
+        # 统计结果
+        param_range_violations = np.array(param_range_violations)
+        spectrum_smoothness_scores = np.array(spectrum_smoothness_scores)
+        frequency_responses = np.array(frequency_responses)
+        
+        results = {
+            'param_range_violation_rate': np.mean(param_range_violations > 0),
+            'avg_param_violations_per_sample': np.mean(param_range_violations),
+            'spectrum_smoothness_mean': np.mean(spectrum_smoothness_scores),
+            'spectrum_smoothness_std': np.std(spectrum_smoothness_scores),
+            'frequency_response_mean': np.mean(frequency_responses),
+            'frequency_response_std': np.std(frequency_responses),
+            'num_samples': len(param_range_violations)
+        }
+        
+        print(f"Physics consistency evaluation completed with {len(param_range_violations)} samples")
+        return results
+    
+    def comprehensive_evaluation(self, num_samples: int = 1000) -> Dict[str, Any]:
+        """
+        执行全面评估
+        
+        Args:
+            num_samples: 评估样本数
+            
+        Returns:
+            Dict[str, Any]: 完整评估结果
+        """
+        print("\n=== Starting Comprehensive Evaluation ===")
+        start_time = time.time()
+        
+        # 检查模型和数据集
+        if not all([self.generator, self.discriminator, self.forward_model, self.dataset]):
+            raise ValueError("Models and dataset must be loaded first!")
+        
+        # 执行各项评估
+        results = {
+            'generator_evaluation': self.evaluate_generator(num_samples),
+            'discriminator_evaluation': self.evaluate_discriminator(num_samples),
+            'physics_consistency': self.evaluate_physics_consistency(num_samples),
+            'evaluation_time': time.time() - start_time,
+            'num_samples': num_samples
+        }
+        
+        # 保存结果
+        self.evaluation_results = results
+        
+        print(f"\n=== Comprehensive Evaluation Completed in {results['evaluation_time']:.2f}s ===")
+        return results
+    
+    def save_evaluation_results(self, save_path: str = None) -> None:
+        """
+        保存评估结果
+        
+        Args:
+            save_path: 保存路径
+        """
+        if save_path is None:
+            save_path = os.path.join(cfg.SAVED_MODELS_DIR, "evaluation_results.npz")
+        
+        # 准备保存数据（移除不能序列化的数据）
+        save_data = {}
+        for key, value in self.evaluation_results.items():
+            if key != 'generator_evaluation' or 'data' not in value:
+                save_data[key] = value
+            else:
+                # 保存生成器评估结果但排除原始数据
+                save_data[key] = {k: v for k, v in value.items() if k != 'data'}
+        
+        np.savez(save_path, **save_data)
+        print(f"Evaluation results saved to: {save_path}")
+    
+    def generate_report(self, save_path: str = None) -> str:
+        """
+        生成评估报告
+        
+        Args:
+            save_path: 报告保存路径
+            
+        Returns:
+            str: 报告内容
+        """
+        if not self.evaluation_results:
+            raise ValueError("No evaluation results available. Run comprehensive_evaluation first.")
+        
+        report_lines = []
+        report_lines.append("=" * 80)
+        report_lines.append("PI-GAN MODEL EVALUATION REPORT")
+        report_lines.append("=" * 80)
+        
+        # 基本信息
+        report_lines.append(f"Evaluation Date: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+        report_lines.append(f"Number of Samples: {self.evaluation_results['num_samples']}")
+        report_lines.append(f"Evaluation Time: {self.evaluation_results['evaluation_time']:.2f}s")
+        report_lines.append("")
+        
+        # 生成器评估
+        gen_results = self.evaluation_results['generator_evaluation']
+        report_lines.append("1. GENERATOR EVALUATION")
+        report_lines.append("-" * 40)
+        
+        report_lines.append("Parameter Prediction:")
+        param_metrics = gen_results['parameter_prediction']
+        report_lines.append(f"  - MSE: {param_metrics['mse']:.6f}")
+        report_lines.append(f"  - MAE: {param_metrics['mae']:.6f}")
+        report_lines.append(f"  - RMSE: {param_metrics['rmse']:.6f}")
+        report_lines.append(f"  - R²: {param_metrics['r2']:.4f}")
+        report_lines.append(f"  - Pearson R: {param_metrics['pearson_r']:.4f}")
+        report_lines.append(f"  - MAPE: {param_metrics['mape']:.2f}%")
+        
+        report_lines.append("\nSpectrum Reconstruction:")
+        spec_metrics = gen_results['spectrum_reconstruction']
+        report_lines.append(f"  - MSE: {spec_metrics['mse']:.6f}")
+        report_lines.append(f"  - MAE: {spec_metrics['mae']:.6f}")
+        report_lines.append(f"  - R²: {spec_metrics['r2']:.4f}")
+        report_lines.append(f"  - Pearson R: {spec_metrics['pearson_r']:.4f}")
+        
+        report_lines.append("\nMetrics Prediction:")
+        metrics_metrics = gen_results['metrics_prediction']
+        report_lines.append(f"  - MSE: {metrics_metrics['mse']:.6f}")
+        report_lines.append(f"  - MAE: {metrics_metrics['mae']:.6f}")
+        report_lines.append(f"  - R²: {metrics_metrics['r2']:.4f}")
+        report_lines.append(f"  - Pearson R: {metrics_metrics['pearson_r']:.4f}")
+        report_lines.append("")
+        
+        # 判别器评估
+        disc_results = self.evaluation_results['discriminator_evaluation']
+        report_lines.append("2. DISCRIMINATOR EVALUATION")
+        report_lines.append("-" * 40)
+        report_lines.append(f"Overall Accuracy: {disc_results['overall_accuracy']:.4f}")
+        report_lines.append(f"Real Sample Accuracy: {disc_results['real_accuracy']:.4f}")
+        report_lines.append(f"Fake Sample Accuracy: {disc_results['fake_accuracy']:.4f}")
+        report_lines.append(f"Total Loss: {disc_results['total_loss']:.6f}")
+        report_lines.append(f"Real Score Mean±Std: {disc_results['real_score_mean']:.4f}±{disc_results['real_score_std']:.4f}")
+        report_lines.append(f"Fake Score Mean±Std: {disc_results['fake_score_mean']:.4f}±{disc_results['fake_score_std']:.4f}")
+        report_lines.append("")
+        
+        # 物理一致性评估
+        phys_results = self.evaluation_results['physics_consistency']
+        report_lines.append("3. PHYSICS CONSISTENCY EVALUATION")
+        report_lines.append("-" * 40)
+        report_lines.append(f"Parameter Range Violation Rate: {phys_results['param_range_violation_rate']:.4f}")
+        report_lines.append(f"Average Violations per Sample: {phys_results['avg_param_violations_per_sample']:.4f}")
+        report_lines.append(f"Spectrum Smoothness: {phys_results['spectrum_smoothness_mean']:.6f}±{phys_results['spectrum_smoothness_std']:.6f}")
+        report_lines.append(f"Frequency Response: {phys_results['frequency_response_mean']:.6f}±{phys_results['frequency_response_std']:.6f}")
+        report_lines.append("")
+        
+        # 总结
+        report_lines.append("4. SUMMARY")
+        report_lines.append("-" * 40)
+        if param_metrics['r2'] > 0.8:
+            report_lines.append("✓ Generator shows GOOD parameter prediction performance")
+        elif param_metrics['r2'] > 0.6:
+            report_lines.append("⚠ Generator shows MODERATE parameter prediction performance")
+        else:
+            report_lines.append("✗ Generator shows POOR parameter prediction performance")
+        
+        if disc_results['overall_accuracy'] > 0.8:
+            report_lines.append("✓ Discriminator shows GOOD discrimination performance")
+        elif disc_results['overall_accuracy'] > 0.6:
+            report_lines.append("⚠ Discriminator shows MODERATE discrimination performance")
+        else:
+            report_lines.append("✗ Discriminator shows POOR discrimination performance")
+        
+        if phys_results['param_range_violation_rate'] < 0.1:
+            report_lines.append("✓ Physics constraints are well satisfied")
+        elif phys_results['param_range_violation_rate'] < 0.3:
+            report_lines.append("⚠ Physics constraints are moderately satisfied")
+        else:
+            report_lines.append("✗ Physics constraints are poorly satisfied")
+        
+        report_lines.append("=" * 80)
+        
+        report_content = "\n".join(report_lines)
+        
+        # 保存报告
+        if save_path is None:
+            save_path = os.path.join(cfg.SAVED_MODELS_DIR, "evaluation_report.txt")
+        
+        with open(save_path, 'w', encoding='utf-8') as f:
+            f.write(report_content)
+        
+        print(f"Evaluation report saved to: {save_path}")
+        return report_content
