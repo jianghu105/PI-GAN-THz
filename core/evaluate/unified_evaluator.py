@@ -25,6 +25,7 @@ import config.config as cfg
 from core.utils.data_loader import MetamaterialDataset, denormalize_params, denormalize_metrics, normalize_spectrum
 from core.utils.set_seed import set_seed
 from core.utils.loss import criterion_mse, criterion_bce
+from core.utils.visualization import EvaluationVisualizer
 
 class UnifiedEvaluator:
     """
@@ -44,6 +45,10 @@ class UnifiedEvaluator:
         self.forward_model = None
         self.dataset = None
         self.evaluation_results = {}
+        
+        # 初始化可视化器
+        plots_dir = os.path.join(cfg.PROJECT_ROOT, "plots")
+        self.visualizer = EvaluationVisualizer(save_dir=plots_dir)
         
         print(f"Unified Evaluator initialized on device: {self.device}")
     
@@ -234,7 +239,13 @@ class UnifiedEvaluator:
         results = {
             'spectrum_prediction': spectrum_metrics,
             'metrics_prediction': metrics_metrics,
-            'num_samples': len(all_real_spectra)
+            'num_samples': len(all_real_spectra),
+            'data_samples': {
+                'real_spectra': all_real_spectra[:50],  # 保存前50个样本用于可视化
+                'pred_spectra': all_pred_spectra[:50],
+                'real_metrics': all_real_metrics[:50],
+                'pred_metrics': all_pred_metrics[:50]
+            }
         }
         
         print(f"✓ Forward network evaluation completed")
@@ -314,7 +325,15 @@ class UnifiedEvaluator:
                 'real_score_mean': np.mean(all_real_scores),
                 'fake_score_mean': np.mean(all_fake_scores)
             },
-            'num_samples': len(all_real_params)
+            'num_samples': len(all_real_params),
+            'data_samples': {
+                'real_params': all_real_params[:50],  # 保存前50个样本用于可视化
+                'pred_params': all_pred_params[:50]
+            },
+            'score_distributions': {
+                'real_scores': all_real_scores[:200],  # 保存前200个得分用于可视化
+                'fake_scores': all_fake_scores[:200]
+            }
         }
         
         print(f"✓ PI-GAN evaluation completed")
@@ -503,11 +522,62 @@ class UnifiedEvaluator:
         # 保存结果
         self.evaluation_results = results
         
+        # 生成可视化
+        print(f"\n🎨 Generating evaluation visualizations...")
+        self.generate_visualizations(results)
+        
         print(f"\n" + "="*80)
         print(f"EVALUATION COMPLETED in {results['evaluation_time']:.2f}s")
         print("="*80)
         
         return results
+    
+    def generate_visualizations(self, results: Dict[str, Any]) -> None:
+        """
+        生成所有评估结果的可视化
+        
+        Args:
+            results: 完整评估结果
+        """
+        try:
+            # 1. 前向网络评估可视化
+            fwd_data = results['forward_network_evaluation'].get('data_samples', {})
+            fwd_plot_path = self.visualizer.plot_forward_network_evaluation(
+                results['forward_network_evaluation'], 
+                fwd_data
+            )
+            print(f"✓ Forward network evaluation plot saved: {fwd_plot_path}")
+            
+            # 2. PI-GAN评估可视化
+            pigan_data = results['pigan_evaluation'].get('data_samples', {})
+            score_data = results['pigan_evaluation'].get('score_distributions', {})
+            pigan_plot_path = self.visualizer.plot_pigan_evaluation(
+                results['pigan_evaluation'],
+                pigan_data,
+                score_data
+            )
+            print(f"✓ PI-GAN evaluation plot saved: {pigan_plot_path}")
+            
+            # 3. 结构预测评估可视化
+            struct_plot_path = self.visualizer.plot_structural_prediction_evaluation(
+                results['structural_prediction_evaluation']
+            )
+            print(f"✓ Structural prediction evaluation plot saved: {struct_plot_path}")
+            
+            # 4. 模型验证评估可视化
+            validation_plot_path = self.visualizer.plot_model_validation_evaluation(
+                results['model_validation']
+            )
+            print(f"✓ Model validation evaluation plot saved: {validation_plot_path}")
+            
+            # 5. 综合摘要可视化
+            summary_plot_path = self.visualizer.plot_comprehensive_summary(results)
+            print(f"✓ Comprehensive summary plot saved: {summary_plot_path}")
+            
+            print(f"🎯 All evaluation visualizations generated in: {self.visualizer.save_dir}")
+            
+        except Exception as e:
+            print(f"⚠ Warning: Failed to generate some visualizations: {e}")
     
     def generate_summary_report(self, save_path: str = None) -> str:
         """
@@ -622,7 +692,7 @@ class UnifiedEvaluator:
         
         # 保存报告
         if save_path is None:
-            save_path = os.path.join(cfg.SAVED_MODELS_DIR, "unified_evaluation_report.txt")
+            save_path = os.path.join(self.visualizer.save_dir, "unified_evaluation_report.txt")
         
         with open(save_path, 'w', encoding='utf-8') as f:
             f.write(report_content)
