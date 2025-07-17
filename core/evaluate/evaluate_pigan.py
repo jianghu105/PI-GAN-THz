@@ -4,7 +4,10 @@ import torch
 import numpy as np
 import argparse
 from torch.utils.data import DataLoader 
-from tqdm.notebook import tqdm # Import tqdm.notebook for Colab compatibility
+try:
+    from tqdm.notebook import tqdm  # 适用于 Jupyter/Colab
+except ImportError:
+    from tqdm import tqdm  # 适用于命令行环境
 
 # Add the project root to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))

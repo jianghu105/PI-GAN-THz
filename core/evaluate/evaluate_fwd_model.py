@@ -1,5 +1,3 @@
-# PI_GAN_THZ/core/evaluate/evaluate_fwd_model.py
-
 import sys
 import os
 import torch
@@ -38,7 +36,9 @@ def evaluate_forward_model(num_samples_to_plot: int = 5):
     sys.stdout.flush()
 
     # 确保创建必要的目录，包括 plots 目录
-    cfg.create_directories() 
+    cfg.create_directories()
+    print("All necessary directories ensured to exist.") # 英文化
+    sys.stdout.flush()
 
     # --- 数据加载 ---
     data_path = cfg.DATASET_PATH
@@ -47,8 +47,11 @@ def evaluate_forward_model(num_samples_to_plot: int = 5):
         sys.stdout.flush() # 立即刷新错误输出
         sys.exit(1)
 
+    print(f"Loading data from {data_path}...") # 英文化
+    sys.stdout.flush()
+
     dataset = MetamaterialDataset(data_path=data_path, num_points_per_sample=cfg.SPECTRUM_DIM)
-    print(f"Dataset size: {len(dataset)} samples")
+    print(f"Dataset size: {len(dataset)} samples") # 英文化
     sys.stdout.flush()
 
     # --- 模型初始化和加载 ---
@@ -58,7 +61,6 @@ def evaluate_forward_model(num_samples_to_plot: int = 5):
         output_metrics_dim=cfg.FORWARD_MODEL_OUTPUT_METRICS_DIM
     ).to(device)
 
-    # 修正模型文件名为 'forward_model_final.pth'
     fwd_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_final.pth") 
     if not os.path.exists(fwd_model_path):
         print(f"Error: Pretrained Forward Model not found at {fwd_model_path}. Please run pretrain_fwd_model.py first, or ensure 'forward_model_final.pth' exists.")
@@ -72,14 +74,29 @@ def evaluate_forward_model(num_samples_to_plot: int = 5):
 
     # --- 加载损失历史 ---
     loss_history_path = os.path.join(cfg.SAVED_MODELS_DIR, "fwd_pretrain_loss_history.pt")
+    epoch_losses = [] # 默认初始化为空列表
+
     if not os.path.exists(loss_history_path):
         print(f"Warning: Forward Model pretraining loss history not found at {loss_history_path}. Loss plot cannot be generated.")
         sys.stdout.flush()
-        epoch_losses = []
     else:
-        epoch_losses = torch.load(loss_history_path)
-        print(f"Loaded Forward Model pretraining loss history from {loss_history_path}")
-        sys.stdout.flush()
+        try:
+            loaded_history = torch.load(loss_history_path)
+            # 根据您提供的文件内容，损失值存储在字典的 'train_losses' 键下
+            if isinstance(loaded_history, dict) and 'train_losses' in loaded_history:
+                epoch_losses = loaded_history['train_losses']
+                print(f"Loaded Forward Model pretraining loss history from {loss_history_path} (key 'train_losses')")
+            elif isinstance(loaded_history, list): # 如果直接是一个列表 (备用兼容)
+                epoch_losses = loaded_history
+                print(f"Loaded Forward Model pretraining loss history from {loss_history_path} (as a list)")
+            else:
+                print(f"Warning: Loss history file {loss_history_path} has an unexpected format. Cannot plot losses.")
+                epoch_losses = [] # 重置为无法绘制的状态
+            sys.stdout.flush()
+        except Exception as e:
+            print(f"Error loading loss history from {loss_history_path}: {e}. Cannot plot losses.")
+            sys.stdout.flush()
+            epoch_losses = [] # 重置为无法绘制的状态
 
     # --- 绘制损失曲线 ---
     if epoch_losses:
@@ -93,7 +110,7 @@ def evaluate_forward_model(num_samples_to_plot: int = 5):
             ylabel='MSE Loss',
             save_path=os.path.join(cfg.PLOTS_DIR, 'fwd_pretrain_loss.png')
         )
-        print(f"Loss plot saved to {os.path.join(cfg.PLOTS_DIR, 'fwd_pretrain_loss.png')}") # 修正打印的路径
+        print(f"Loss plot saved to {os.path.join(cfg.PLOTS_DIR, 'fwd_pretrain_loss.png')}")
         sys.stdout.flush()
     else:
         print("No loss history available to plot.")
@@ -104,11 +121,21 @@ def evaluate_forward_model(num_samples_to_plot: int = 5):
     sys.stdout.flush()
     with torch.no_grad():
         # 从数据集中随机选择一些样本进行可视化
+        if num_samples_to_plot <= 0: # 增加对 <= 0 样本数的处理
+            print("Warning: Number of samples to plot is 0 or negative, skipping sample visualization.")
+            sys.stdout.flush()
+            return # 提前退出
+        
         if num_samples_to_plot > len(dataset):
             num_samples_to_plot = len(dataset)
             print(f"Warning: num_samples_to_plot exceeds dataset size. Plotting all {num_samples_to_plot} samples.")
             sys.stdout.flush()
         
+        if num_samples_to_plot == 0: # 再次检查调整后的样本数
+            print("Not enough samples available for generating visualization.")
+            sys.stdout.flush()
+            return # 提前退出
+
         sample_indices = np.random.choice(len(dataset), num_samples_to_plot, replace=False)
         
         # 获取真实数据
@@ -139,9 +166,9 @@ def evaluate_forward_model(num_samples_to_plot: int = 5):
             frequencies=frequencies,
             num_samples=num_samples_to_plot,
             save_path=os.path.join(cfg.PLOTS_DIR, 'fwd_model_predictions.png'),
-            metric_names=dataset.metrics_names # 传递指标名称以便绘制
+            metric_names=dataset.metric_names # 修正为 metric_names
         )
-    print(f"Forward model prediction plots saved to {os.path.join(cfg.PLOTS_DIR, 'fwd_model_predictions.png')}") # 修正打印的路径
+    print(f"Forward model prediction plots saved to {os.path.join(cfg.PLOTS_DIR, 'fwd_model_predictions.png')}")
     sys.stdout.flush()
     print("--- Forward Model Evaluation Script Finished ---")
     sys.stdout.flush()

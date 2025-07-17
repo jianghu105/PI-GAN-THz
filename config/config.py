@@ -18,8 +18,9 @@ NUM_WORKERS = 4                  # DataLoader 使用的进程数，可根据您�
 # --- 3. 路径设置 ---
 # 数据文件目录和完整路径
 DATA_DIR = os.path.join(PROJECT_ROOT, "dataset")
-# 确保这里使用 DATA_DIR 而不是直接的相对路径字符串
-DATASET_PATH = os.path.join(DATA_DIR, "THz_Metamaterial_Spectra_With_Metrics.csv")
+# 根据实际数据文件名调整
+DATASET_PATH = os.path.join(DATA_DIR, "THZ.txt")  # 修改为实际数据文件名
+FULL_DATA_PATH = os.path.join(DATA_DIR, "THz_Metamaterial_Spectra_With_Metrics.csv")  # 完整训练数据
 
 # 模型检查点、最终模型和日志的保存目录
 CHECKPOINT_DIR = os.path.join(PROJECT_ROOT, "checkpoints") # 训练过程中的检查点
@@ -30,12 +31,14 @@ PLOTS_DIR = os.path.join(PROJECT_ROOT, "plots")               # 绘图保存目�
 
 # --- 4. 数据设置 ---
 SPECTRUM_DIM = 250               # 太赫兹光谱的数据点数量 (例如，频率采样点)
-
+NUM_SPECTRUM_POINTS = SPECTRUM_DIM  # 兼容性别名
 
 # --- 5. 模型维度 ---
 # 生成器 (Generator)
 Z_DIM = 100                      # 噪声向量的维度，作为生成器的输入 (通常为100或128)
-GENERATOR_OUTPUT_PARAM_DIM = 4   # G的输出是结构参数 (r1, r2, w, g)
+GENERATOR_INPUT_DIM = SPECTRUM_DIM               # 生成器输入维度（光谱）
+GENERATOR_OUTPUT_DIM = 4                         # 生成器输出维度（结构参数）
+GENERATOR_OUTPUT_PARAM_DIM = 4                   # 兼容性别名
 
 # 判别器 (Discriminator)
 DISCRIMINATOR_INPUT_SPEC_DIM = SPECTRUM_DIM      # D的输入光谱部分
@@ -51,6 +54,7 @@ FORWARD_MODEL_OUTPUT_METRICS_DIM = 8                # FwdModel的输出是物理
 # 前向模型预训练 (Pretraining Forward Model)
 FWD_PRETRAIN_EPOCHS = 500  # 前向模型预训练的 epoch 数量
 FWD_PRETRAIN_LR = 0.001    # 前向模型预训练的学习率
+LR_FWD_SIM = 0.001         # 兼容性别名
 
 # PI-GAN (Generator + Discriminator) 训练
 NUM_EPOCHS = 500           # PI-GAN 主训练的 Epoch 数量
@@ -62,6 +66,7 @@ LR_D = 0.0002              # 判别器的学习率
 # 训练日志和模型保存频率
 LOG_INTERVAL = 10          # 每隔多少个 batch 打印一次日志或 TensorBoard 记录
 SAVE_MODEL_INTERVAL = 50   # 每隔多少个 epoch 保存一次模型检查点 (主要用于GAN模型)
+SAVE_INTERVAL = 50         # 兼容性别名
 
 
 # --- 7. 损失权重 (用于生成器总损失的加权求和) ---

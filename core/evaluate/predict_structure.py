@@ -20,7 +20,10 @@ from core.utils.data_loader import MetamaterialDataset, denormalize_params, deno
 from core.utils.plot_utils import plot_fwd_model_predictions
 from core.utils.set_seed import set_seed
 from core.utils.loss import criterion_mse
-from tqdm.notebook import tqdm
+try:
+    from tqdm.notebook import tqdm  # 适用于 Jupyter/Colab
+except ImportError:
+    from tqdm import tqdm  # 适用于命令行环境
 
 def process_thz_data(thz_file_path: str, target_frequencies: np.ndarray) -> np.ndarray:
     """
