@@ -1,7 +1,11 @@
 # PI_GAN_THZ/config/config.py
 
 import os
-import torch
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
 
 # --- 1. 项目根目录设置 ---
 # 获取当前文件所在目录的父目录，作为项目的根目录
@@ -11,7 +15,7 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # --- 2. 通用设置 ---
 RANDOM_SEED = 42                 # 随机种子，用于结果复现
 # 自动检测设备 (CUDA 或 CPU)
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cuda" if TORCH_AVAILABLE and torch.cuda.is_available() else "cpu"
 NUM_WORKERS = 4                  # DataLoader 使用的进程数，可根据您的CPU核心数和内存调整
 
 
@@ -19,7 +23,7 @@ NUM_WORKERS = 4                  # DataLoader 使用的进程数，可根据您�
 # 数据文件目录和完整路径
 DATA_DIR = os.path.join(PROJECT_ROOT, "dataset")
 # 根据实际数据文件名调整
-DATASET_PATH = os.path.join(DATA_DIR, "THZ.txt")  # 修改为实际数据文件名
+DATASET_PATH = os.path.join(DATA_DIR, "THz_Metamaterial_Spectra_With_Metrics.csv")  # 修改为实际数据文件名
 FULL_DATA_PATH = os.path.join(DATA_DIR, "THz_Metamaterial_Spectra_With_Metrics.csv")  # 完整训练数据
 
 # 模型检查点、最终模型和日志的保存目录

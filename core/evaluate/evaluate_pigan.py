@@ -12,7 +12,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 # 导入统一评估器
-from unified_evaluator import UnifiedEvaluator
+from core.evaluate.unified_evaluator import UnifiedEvaluator
 import config.config as cfg
 from core.utils.set_seed import set_seed
 
