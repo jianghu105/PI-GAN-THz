@@ -10,6 +10,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
 import numpy as np
 import argparse
 import time
+import matplotlib.pyplot as plt
 from typing import Dict, Tuple, Optional
 
 # 将项目根目录添加到 Python 路径
@@ -69,33 +70,23 @@ class OptimizedTrainer:
         """初始化优化后的模型"""
         print("Initializing optimized models...")
         
-        # 生成器 - 增强架构
+        # 生成器 - 基础架构（原模型不支持额外参数）
         self.generator = Generator(
             input_dim=cfg.SPECTRUM_DIM,
-            output_dim=cfg.GENERATOR_OUTPUT_PARAM_DIM,
-            hidden_dims=self.opt_config['generator']['hidden_dims'],
-            dropout_rate=self.opt_config['generator']['dropout_rate'],
-            use_residual=self.opt_config['model_architecture']['generator']['use_attention'],
-            use_attention=self.opt_config['model_architecture']['generator']['use_attention']
+            output_dim=cfg.GENERATOR_OUTPUT_PARAM_DIM
         ).to(self.device)
         
-        # 判别器 - 优化架构
+        # 判别器 - 基础架构（原模型不支持额外参数）
         self.discriminator = Discriminator(
             input_spec_dim=cfg.DISCRIMINATOR_INPUT_SPEC_DIM,
-            input_param_dim=cfg.DISCRIMINATOR_INPUT_PARAM_DIM,
-            hidden_dims=self.opt_config['discriminator']['hidden_dims'],
-            dropout_rate=self.opt_config['discriminator']['dropout_rate'],
-            use_spectral_norm=self.opt_config['model_architecture']['discriminator']['use_spectral_norm']
+            input_param_dim=cfg.DISCRIMINATOR_INPUT_PARAM_DIM
         ).to(self.device)
         
-        # 前向模型 - 增强架构
+        # 前向模型 - 基础架构（原模型不支持额外参数）
         self.forward_model = ForwardModel(
             input_param_dim=cfg.FORWARD_MODEL_INPUT_DIM,
             output_spectrum_dim=cfg.FORWARD_MODEL_OUTPUT_SPEC_DIM,
-            output_metrics_dim=cfg.FORWARD_MODEL_OUTPUT_METRICS_DIM,
-            hidden_dims=self.opt_config['forward_model']['hidden_dims'],
-            dropout_rate=self.opt_config['forward_model']['dropout_rate'],
-            use_batch_norm=self.opt_config['model_architecture']['forward_model']['use_batch_norm']
+            output_metrics_dim=cfg.FORWARD_MODEL_OUTPUT_METRICS_DIM
         ).to(self.device)
         
         print("✓ Models initialized with optimized architectures")
@@ -386,6 +377,94 @@ class OptimizedTrainer:
                 self.save_checkpoint(epoch + 1)
         
         print("✓ Optimized training completed")
+        
+        # Generate training plots
+        self.plot_training_curves()
+    
+    def plot_training_curves(self):
+        """Generate training loss and accuracy curves"""
+        if not self.train_history['g_losses']:
+            print("⚠ No training history available for plotting")
+            return
+        
+        # Set up English plotting
+        plt.rcParams['font.family'] = 'DejaVu Sans'
+        plt.rcParams['axes.unicode_minus'] = False
+        
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+        fig.suptitle('PI-GAN Training Progress', fontsize=16)
+        
+        epochs = range(1, len(self.train_history['g_losses']) + 1)
+        
+        # 1. Generator and Discriminator Loss
+        axes[0, 0].plot(epochs, self.train_history['g_losses'], label='Generator Loss', color='blue', alpha=0.8)
+        axes[0, 0].plot(epochs, self.train_history['d_losses'], label='Discriminator Loss', color='red', alpha=0.8)
+        axes[0, 0].set_title('Generator vs Discriminator Loss')
+        axes[0, 0].set_xlabel('Epoch')
+        axes[0, 0].set_ylabel('Loss')
+        axes[0, 0].legend()
+        axes[0, 0].grid(True, alpha=0.3)
+        
+        # 2. Parameter Violation Rate
+        if self.train_history['constraint_violations']:
+            axes[0, 1].plot(epochs, self.train_history['constraint_violations'], 
+                           label='Violation Rate', color='orange', linewidth=2)
+            axes[0, 1].axhline(y=0.1, color='green', linestyle='--', 
+                              label='Target (10%)', alpha=0.7)
+            axes[0, 1].set_title('Parameter Constraint Violation Rate')
+            axes[0, 1].set_xlabel('Epoch')
+            axes[0, 1].set_ylabel('Violation Rate')
+            axes[0, 1].legend()
+            axes[0, 1].grid(True, alpha=0.3)
+        
+        # 3. Training Loss Breakdown (if available)
+        if hasattr(self, 'detailed_losses') and self.detailed_losses:
+            loss_components = ['adversarial', 'reconstruction', 'constraint', 'physics']
+            colors = ['blue', 'green', 'orange', 'purple']
+            for i, (component, color) in enumerate(zip(loss_components, colors)):
+                if component in self.detailed_losses:
+                    axes[1, 0].plot(epochs, self.detailed_losses[component], 
+                                   label=f'{component.capitalize()} Loss', color=color, alpha=0.8)
+            axes[1, 0].set_title('Loss Components Breakdown')
+            axes[1, 0].set_xlabel('Epoch')
+            axes[1, 0].set_ylabel('Loss Value')
+            axes[1, 0].legend()
+            axes[1, 0].grid(True, alpha=0.3)
+        else:
+            axes[1, 0].text(0.5, 0.5, 'Detailed loss breakdown\nnot available', 
+                           ha='center', va='center', transform=axes[1, 0].transAxes,
+                           fontsize=12, alpha=0.7)
+            axes[1, 0].set_title('Loss Components Breakdown')
+        
+        # 4. Learning Rate Schedule
+        if hasattr(self, 'lr_history') and self.lr_history:
+            axes[1, 1].plot(epochs, self.lr_history['generator'], 
+                           label='Generator LR', color='blue', alpha=0.8)
+            axes[1, 1].plot(epochs, self.lr_history['discriminator'], 
+                           label='Discriminator LR', color='red', alpha=0.8)
+            axes[1, 1].set_title('Learning Rate Schedule')
+            axes[1, 1].set_xlabel('Epoch')
+            axes[1, 1].set_ylabel('Learning Rate')
+            axes[1, 1].legend()
+            axes[1, 1].grid(True, alpha=0.3)
+            axes[1, 1].set_yscale('log')
+        else:
+            axes[1, 1].text(0.5, 0.5, 'Learning rate history\nnot available', 
+                           ha='center', va='center', transform=axes[1, 1].transAxes,
+                           fontsize=12, alpha=0.7)
+            axes[1, 1].set_title('Learning Rate Schedule')
+        
+        plt.tight_layout()
+        
+        # Save plot
+        plots_dir = os.path.join(cfg.PROJECT_ROOT, "plots")
+        os.makedirs(plots_dir, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        plot_path = os.path.join(plots_dir, f"training_curves_{timestamp}.png")
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"✓ Training curves saved to: {plot_path}")
     
     def save_checkpoint(self, epoch: int):
         """保存检查点"""
@@ -438,7 +517,7 @@ def main():
         dataset, 
         batch_size=args.batch_size, 
         shuffle=True,
-        num_workers=4,
+        num_workers=2,  # Reduced to avoid worker warning
         pin_memory=True
     )
     

@@ -11,8 +11,8 @@ from datetime import datetime
 import matplotlib.patches as patches
 from matplotlib.gridspec import GridSpec
 
-# 设置中文字体和绘图风格
-plt.rcParams['font.sans-serif'] = ['SimHei', 'DejaVu Sans']
+# Set English fonts and plotting style
+plt.rcParams['font.family'] = 'DejaVu Sans'
 plt.rcParams['axes.unicode_minus'] = False
 sns.set_style("whitegrid")
 sns.set_palette("husl")
@@ -61,26 +61,26 @@ class EvaluationVisualizer:
         fig = plt.figure(figsize=(20, 12))
         gs = GridSpec(3, 4, figure=fig, hspace=0.3, wspace=0.3)
         
-        # 1. 性能指标概览
+        # 1. Performance Metrics Overview
         ax1 = fig.add_subplot(gs[0, :2])
         metrics = ['spectrum_prediction', 'metrics_prediction']
-        metric_names = ['光谱预测', '指标预测']
+        metric_names = ['Spectrum Prediction', 'Metrics Prediction']
         r2_scores = [results[m]['r2'] for m in metrics]
         mae_scores = [results[m]['mae'] for m in metrics]
         
         x = np.arange(len(metric_names))
         width = 0.35
         
-        bars1 = ax1.bar(x - width/2, r2_scores, width, label='R²分数', 
+        bars1 = ax1.bar(x - width/2, r2_scores, width, label='R² Score', 
                        color=self.colors['real'], alpha=0.8)
         ax2 = ax1.twinx()
         bars2 = ax2.bar(x + width/2, mae_scores, width, label='MAE', 
                        color=self.colors['pred'], alpha=0.8)
         
-        ax1.set_xlabel('预测类型')
-        ax1.set_ylabel('R²分数', color=self.colors['real'])
+        ax1.set_xlabel('Prediction Type')
+        ax1.set_ylabel('R² Score', color=self.colors['real'])
         ax2.set_ylabel('MAE', color=self.colors['pred'])
-        ax1.set_title('前向网络性能概览')
+        ax1.set_title('Forward Network Performance Overview')
         ax1.set_xticks(x)
         ax1.set_xticklabels(metric_names)
         
@@ -90,10 +90,10 @@ class EvaluationVisualizer:
             ax1.text(bar.get_x() + bar.get_width()/2., height + 0.01,
                     f'{height:.3f}', ha='center', va='bottom')
         
-        # 2. 详细指标雷达图
+        # 2. Detailed Metrics Radar Chart
         ax3 = fig.add_subplot(gs[0, 2:], projection='polar')
         
-        categories = ['R²', 'Pearson相关系数', '归一化RMSE', '归一化MAE']
+        categories = ['R²', 'Pearson Correlation', 'Normalized RMSE', 'Normalized MAE']
         spectrum_metrics = results['spectrum_prediction']
         values = [
             spectrum_metrics['r2'],
@@ -106,31 +106,31 @@ class EvaluationVisualizer:
         values += values[:1]
         angles += angles[:1]
         
-        ax3.plot(angles, values, 'o-', linewidth=2, label='光谱预测', color=self.colors['real'])
+        ax3.plot(angles, values, 'o-', linewidth=2, label='Spectrum Prediction', color=self.colors['real'])
         ax3.fill(angles, values, alpha=0.25, color=self.colors['real'])
         ax3.set_xticks(angles[:-1])
         ax3.set_xticklabels(categories)
         ax3.set_ylim(0, 1)
-        ax3.set_title('光谱预测详细指标')
+        ax3.set_title('Spectrum Prediction Detailed Metrics')
         
-        # 3. 光谱重建对比 (如果有数据样本)
+        # 3. Spectrum Reconstruction Comparison (if data samples available)
         if data_samples and 'real_spectra' in data_samples and 'pred_spectra' in data_samples:
             ax4 = fig.add_subplot(gs[1, :2])
             
-            # 选择几个样本进行展示
+            # Select a few samples for display
             n_samples = min(3, len(data_samples['real_spectra']))
             frequencies = np.linspace(0.5, 3.0, data_samples['real_spectra'].shape[1])
             
             for i in range(n_samples):
-                offset = i * 5  # 偏移量用于区分不同样本
+                offset = i * 5  # Offset to distinguish different samples
                 ax4.plot(frequencies, data_samples['real_spectra'][i] + offset, 
-                        label=f'真实光谱 {i+1}', linestyle='-', alpha=0.8)
+                        label=f'Real Spectrum {i+1}', linestyle='-', alpha=0.8)
                 ax4.plot(frequencies, data_samples['pred_spectra'][i] + offset, 
-                        label=f'预测光谱 {i+1}', linestyle='--', alpha=0.8)
+                        label=f'Predicted Spectrum {i+1}', linestyle='--', alpha=0.8)
             
-            ax4.set_xlabel('频率 (THz)')
-            ax4.set_ylabel('传输系数 (dB)')
-            ax4.set_title('光谱重建对比样例')
+            ax4.set_xlabel('Frequency (THz)')
+            ax4.set_ylabel('Transmission Coefficient (dB)')
+            ax4.set_title('Spectrum Reconstruction Comparison Examples')
             ax4.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         
         # 4. 误差分布直方图

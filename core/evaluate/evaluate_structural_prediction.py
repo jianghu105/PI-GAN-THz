@@ -5,6 +5,8 @@ import os
 import torch
 import numpy as np
 import argparse
+import matplotlib.pyplot as plt
+import time
 
 # Add the project root to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -104,7 +106,143 @@ def evaluate_structural_prediction(model_dir: str = None,
         print("  - Enhance forward model training for better reconstruction")
         print("  - Check data quality and preprocessing procedures")
     
+    # Generate evaluation plots
+    plot_structural_prediction_evaluation(results)
+    
     print(f"\n✅ Structural prediction evaluation completed with {results['num_samples']} samples.")
+
+def plot_structural_prediction_evaluation(results):
+    """Generate plots for structural prediction evaluation"""
+    
+    # Set up English plotting
+    plt.rcParams['font.family'] = 'DejaVu Sans'
+    plt.rcParams['axes.unicode_minus'] = False
+    
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    fig.suptitle('Structural Prediction Evaluation Results', fontsize=16)
+    
+    # 1. Violation Rate Assessment
+    violation_rate = results['param_range_violation_rate']
+    target_rate = 0.1  # Target violation rate
+    
+    categories = ['Current\nViolation Rate', 'Target\nViolation Rate']
+    values = [violation_rate, target_rate]
+    colors = ['red' if violation_rate > target_rate else 'green', 'green']
+    
+    bars = axes[0, 0].bar(categories, values, color=colors, alpha=0.7)
+    axes[0, 0].set_title('Parameter Violation Rate Assessment')
+    axes[0, 0].set_ylabel('Violation Rate')
+    axes[0, 0].set_ylim(0, max(violation_rate, target_rate) * 1.2)
+    
+    # Add value labels
+    for bar, value in zip(bars, values):
+        height = bar.get_height()
+        axes[0, 0].text(bar.get_x() + bar.get_width()/2., height + height * 0.02,
+                       f'{value:.3f}', ha='center', va='bottom', fontweight='bold')
+    
+    # 2. Consistency and Reconstruction Quality
+    metrics = ['Consistency\nScore', 'Reconstruction\nError (×10)']
+    metric_values = [results['consistency_score_mean'], results['reconstruction_error_mean'] * 10]
+    targets = [0.9, 0.5]  # Target values
+    
+    x = np.arange(len(metrics))
+    width = 0.35
+    
+    bars1 = axes[0, 1].bar(x - width/2, metric_values, width, label='Current', alpha=0.7, color='blue')
+    bars2 = axes[0, 1].bar(x + width/2, targets, width, label='Target', alpha=0.7, color='green')
+    
+    axes[0, 1].set_title('Quality Metrics Comparison')
+    axes[0, 1].set_ylabel('Metric Value')
+    axes[0, 1].set_xticks(x)
+    axes[0, 1].set_xticklabels(metrics)
+    axes[0, 1].legend()
+    
+    # Add value labels
+    for bar, value in zip(bars1, metric_values):
+        height = bar.get_height()
+        axes[0, 1].text(bar.get_x() + bar.get_width()/2., height + 0.02,
+                       f'{value:.3f}', ha='center', va='bottom', fontsize=9)
+    
+    # 3. Performance Summary Radar Chart
+    ax_radar = plt.subplot(2, 2, 3, projection='polar')
+    
+    categories_radar = ['Low Violation\nRate', 'High Consistency', 'Low Recon\nError', 'Overall\nQuality']
+    values_radar = [
+        1 - min(violation_rate, 1.0),  # Inverted violation rate
+        results['consistency_score_mean'],
+        1 - min(results['reconstruction_error_mean'] * 10, 1.0),  # Inverted and scaled error
+        (1 - min(violation_rate, 1.0) + results['consistency_score_mean'] + 
+         1 - min(results['reconstruction_error_mean'] * 10, 1.0)) / 3  # Average quality
+    ]
+    
+    angles = np.linspace(0, 2*np.pi, len(categories_radar), endpoint=False).tolist()
+    values_radar += values_radar[:1]
+    angles += angles[:1]
+    
+    ax_radar.plot(angles, values_radar, 'o-', linewidth=2, label='Current Performance', color='orange')
+    ax_radar.fill(angles, values_radar, alpha=0.25, color='orange')
+    ax_radar.set_xticks(angles[:-1])
+    ax_radar.set_xticklabels(categories_radar)
+    ax_radar.set_ylim(0, 1)
+    ax_radar.set_title('Structural Prediction Quality Radar')
+    
+    # 4. Detailed Statistics
+    axes[1, 1].axis('off')
+    
+    # Create a text summary
+    summary_text = f"""
+Detailed Statistics:
+
+Parameter Violations:
+• Violation Rate: {violation_rate:.1%}
+• Avg Violations/Sample: {results['avg_param_violations']:.2f}
+
+Reconstruction Quality:
+• Mean Error: {results['reconstruction_error_mean']:.6f}
+• Error Std Dev: {results['reconstruction_error_std']:.6f}
+
+Prediction Consistency:
+• Mean Score: {results['consistency_score_mean']:.4f}
+• Score Std Dev: {results['consistency_score_std']:.4f}
+
+Performance Rating:
+"""
+    
+    # Add performance rating
+    if violation_rate < 0.05 and results['consistency_score_mean'] > 0.9:
+        rating = "EXCELLENT ✅"
+        color = 'green'
+    elif violation_rate < 0.1 and results['consistency_score_mean'] > 0.8:
+        rating = "GOOD ✅"
+        color = 'blue'
+    elif violation_rate < 0.2 and results['consistency_score_mean'] > 0.6:
+        rating = "MODERATE ⚠️"
+        color = 'orange'
+    else:
+        rating = "POOR ❌"
+        color = 'red'
+    
+    summary_text += f"• Overall: {rating}"
+    
+    axes[1, 1].text(0.05, 0.95, summary_text, transform=axes[1, 1].transAxes,
+                   fontsize=10, verticalalignment='top', fontfamily='monospace')
+    
+    # Add colored rating box
+    axes[1, 1].text(0.7, 0.15, rating, transform=axes[1, 1].transAxes,
+                   fontsize=14, fontweight='bold', ha='center', va='center',
+                   bbox=dict(boxstyle="round,pad=0.3", facecolor=color, alpha=0.3))
+    
+    plt.tight_layout()
+    
+    # Save plot
+    plots_dir = os.path.join(cfg.PROJECT_ROOT, "plots")
+    os.makedirs(plots_dir, exist_ok=True)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    plot_path = os.path.join(plots_dir, f"structural_prediction_evaluation_{timestamp}.png")
+    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"✓ Structural prediction evaluation plot saved to: {plot_path}")
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate structural prediction capabilities")
