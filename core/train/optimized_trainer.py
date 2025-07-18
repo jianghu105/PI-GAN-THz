@@ -489,6 +489,15 @@ class OptimizedTrainer:
         """保存最终模型"""
         os.makedirs(cfg.SAVED_MODELS_DIR, exist_ok=True)
         
+        # 保存为评估器期望的文件名
+        torch.save(self.generator.state_dict(), 
+                  os.path.join(cfg.SAVED_MODELS_DIR, "generator_final.pth"))
+        torch.save(self.discriminator.state_dict(), 
+                  os.path.join(cfg.SAVED_MODELS_DIR, "discriminator_final.pth"))
+        torch.save(self.forward_model.state_dict(), 
+                  os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_final.pth"))
+        
+        # 同时保存优化版本作为备份
         torch.save(self.generator.state_dict(), 
                   os.path.join(cfg.SAVED_MODELS_DIR, "generator_optimized.pth"))
         torch.save(self.discriminator.state_dict(), 
@@ -497,6 +506,10 @@ class OptimizedTrainer:
                   os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_optimized.pth"))
         
         print("✓ Final optimized models saved")
+        print(f"✓ Models saved to: {cfg.SAVED_MODELS_DIR}")
+        print("  - generator_final.pth")
+        print("  - discriminator_final.pth") 
+        print("  - forward_model_final.pth")
 
 def main():
     """主函数"""
