@@ -6,195 +6,101 @@ import torch.nn.functional as F
 
 class EnhancedDiscriminator(nn.Module):
     """
-    增强版判别器：分别处理光谱和参数特征，然后融合
+    增强版判别器（双头设计）：
+    1. 真实/生成判别头
+    2. 物理一致性判别头
     """
-    def __init__(self, input_spec_dim, input_param_dim, use_spectral_norm=True):
+    
+    def __init__(self, spectrum_dim: int = 250, param_dim: int = 4):
         super(EnhancedDiscriminator, self).__init__()
+        self.spectrum_dim = spectrum_dim
+        self.param_dim = param_dim
         
-        # 光谱特征提取器
-        self.spectrum_encoder = nn.Sequential(
-            nn.Linear(input_spec_dim, 512),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.3),
-            
-            nn.Linear(512, 256),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.3),
-            
-            nn.Linear(256, 128),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.2),
+        # 共享的光谱处理分支（共振区域聚焦）
+        self.spectrum_processor = nn.Sequential(
+            nn.Conv1d(1, 24, kernel_size=7, padding=3),  # 较大卷积核捕获共振峰特征
+            nn.LeakyReLU(0.2),
+            nn.Conv1d(24, 48, kernel_size=5, padding=2),
+            nn.LeakyReLU(0.2),
+            nn.AdaptiveMaxPool1d(128)  # 自适应最大池化保留关键频率点
         )
         
-        # 参数特征提取器
-        self.param_encoder = nn.Sequential(
-            nn.Linear(input_param_dim, 64),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.3),
-            
+        # 结构参数特征提取
+        self.param_processor = nn.Sequential(
+            nn.Linear(param_dim, 64),
+            nn.LeakyReLU(0.2),
             nn.Linear(64, 32),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.2),
+            nn.LeakyReLU(0.2)
         )
         
-        # 融合层
-        fusion_dim = 128 + 32  # spectrum features + param features
-        self.fusion_layers = nn.Sequential(
-            nn.Linear(fusion_dim, 256),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.4),
-            
+        # 共享特征提取（带残差块）
+        self.shared_features = nn.Sequential(
+            nn.Linear(48 * 128 + 32, 256),  # 光谱特征(48*128) + 参数特征(32)
+            nn.LeakyReLU(0.2),
+            ResidualBlockDisc(256, 0.3),  # 带缩放因子的残差连接
             nn.Linear(256, 128),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.3),
-            
-            nn.Linear(128, 64),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(64, 1),
-            nn.Sigmoid()
+            nn.LeakyReLU(0.2)
         )
         
-        # 应用谱归一化提高训练稳定性
-        if use_spectral_norm:
-            self._apply_spectral_norm()
-            
-    def _apply_spectral_norm(self):
-        """应用谱归一化到所有线性层"""
-        from torch.nn.utils import spectral_norm
-        
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                spectral_norm(module)
-                
-    def forward(self, spectrum, params):
-        # 确保输入是2D的
-        if spectrum.dim() > 2:
-            spectrum = spectrum.view(spectrum.size(0), -1)
-        if params.dim() > 2:
-            params = params.view(params.size(0), -1)
-            
-        # 分别提取特征
-        spectrum_features = self.spectrum_encoder(spectrum)
-        param_features = self.param_encoder(params)
-        
-        # 特征融合
-        combined_features = torch.cat([spectrum_features, param_features], dim=1)
-        
-        # 最终分类
-        output = self.fusion_layers(combined_features)
-        
-        return output
-
-class ConvDiscriminator(nn.Module):
-    """
-    基于卷积的判别器：更适合处理光谱数据
-    """
-    def __init__(self, input_spec_dim, input_param_dim):
-        super(ConvDiscriminator, self).__init__()
-        
-        # 光谱的1D卷积处理
-        self.spectrum_conv = nn.Sequential(
-            nn.Conv1d(1, 64, kernel_size=7, padding=3),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.MaxPool1d(2),
-            
-            nn.Conv1d(64, 128, kernel_size=5, padding=2),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.MaxPool1d(2),
-            
-            nn.Conv1d(128, 256, kernel_size=3, padding=1),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.AdaptiveAvgPool1d(16),
-        )
-        
-        # 参数处理
-        self.param_encoder = nn.Sequential(
-            nn.Linear(input_param_dim, 64),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.3),
-            
-            nn.Linear(64, 32),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.2),
-        )
-        
-        # 融合和分类
-        conv_output_dim = 256 * 16  # 256 channels * 16 length
-        self.classifier = nn.Sequential(
-            nn.Linear(conv_output_dim + 32, 512),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.4),
-            
-            nn.Linear(512, 256),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.3),
-            
-            nn.Linear(256, 128),
-            nn.LeakyReLU(0.2, inplace=True),
-            nn.Dropout(0.2),
-            
+        # 真实/生成判别头
+        self.real_fake_head = nn.Sequential(
+            nn.Linear(128, 128),
+            nn.LeakyReLU(0.2),
+            nn.Dropout(0.25),  # 防止过拟合
             nn.Linear(128, 1),
             nn.Sigmoid()
         )
         
-    def forward(self, spectrum, params):
-        batch_size = spectrum.size(0)
-        
-        # 处理光谱数据
-        if spectrum.dim() > 2:
-            spectrum = spectrum.view(batch_size, -1)
-        spectrum_conv_input = spectrum.unsqueeze(1)  # 添加channel维度
-        spectrum_features = self.spectrum_conv(spectrum_conv_input)
-        spectrum_features = spectrum_features.view(batch_size, -1)
-        
-        # 处理参数数据
-        if params.dim() > 2:
-            params = params.view(batch_size, -1)
-        param_features = self.param_encoder(params)
-        
-        # 融合特征
-        combined_features = torch.cat([spectrum_features, param_features], dim=1)
-        
-        # 分类
-        output = self.classifier(combined_features)
-        
-        return output
-
-class MultiScaleDiscriminator(nn.Module):
-    """
-    多尺度判别器：在不同尺度上判别，提高判别能力
-    """
-    def __init__(self, input_spec_dim, input_param_dim):
-        super(MultiScaleDiscriminator, self).__init__()
-        
-        # 全尺度判别器
-        self.full_scale_disc = EnhancedDiscriminator(input_spec_dim, input_param_dim)
-        
-        # 半尺度判别器
-        self.half_scale_disc = EnhancedDiscriminator(input_spec_dim // 2, input_param_dim)
-        
-        # 融合层
-        self.fusion = nn.Sequential(
-            nn.Linear(2, 64),
-            nn.LeakyReLU(0.2, inplace=True),
+        # 物理一致性判别头
+        self.physics_head = nn.Sequential(
+            nn.Linear(128, 64),
+            nn.LeakyReLU(0.2),
             nn.Linear(64, 1),
             nn.Sigmoid()
         )
         
-    def forward(self, spectrum, params):
-        batch_size = spectrum.size(0)
+    def forward(self, spectrum: torch.Tensor, params: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        前向传播
+        Args:
+            spectrum: 光谱数据 (batch_size, 250)
+            params: 结构参数 (batch_size, 4)
+        Returns:
+            tuple: (real_fake_score, physics_score)
+        """
+        batch_size = spectrum.shape[0]
         
-        # 全尺度判别
-        full_output = self.full_scale_disc(spectrum, params)
+        # 光谱特征提取
+        spectrum_input = spectrum.unsqueeze(1)  # (batch, 1, 250)
+        spectrum_features = self.spectrum_processor(spectrum_input)  # (batch, 48, 128)
+        spectrum_features = spectrum_features.view(batch_size, -1)  # (batch, 48*128)
         
-        # 半尺度判别（下采样）
-        half_spectrum = F.avg_pool1d(spectrum.unsqueeze(1), kernel_size=2).squeeze(1)
-        half_output = self.half_scale_disc(half_spectrum, params)
+        # 参数特征提取
+        param_features = self.param_processor(params)  # (batch, 32)
         
-        # 融合多尺度结果
-        combined = torch.cat([full_output, half_output], dim=1)
-        final_output = self.fusion(combined)
+        # 特征融合
+        combined_features = torch.cat([spectrum_features, param_features], dim=1)  # (batch, 48*128+32)
+        shared_features = self.shared_features(combined_features)  # (batch, 128)
         
-        return final_output
+        # 双头输出
+        real_fake_score = self.real_fake_head(shared_features)  # (batch, 1)
+        physics_score = self.physics_head(shared_features)  # (batch, 1)
+        
+        return real_fake_score, physics_score
+
+
+class ResidualBlockDisc(nn.Module):
+    """
+    判别器中的残差块，带缩放因子
+    """
+    def __init__(self, dim: int, scale_factor: float = 0.3):
+        super(ResidualBlockDisc, self).__init__()
+        self.scale_factor = scale_factor
+        self.layer = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.LeakyReLU(0.2),
+            nn.Linear(dim, dim)
+        )
+        
+    def forward(self, x):
+        return x + self.scale_factor * self.layer(x)

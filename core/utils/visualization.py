@@ -220,13 +220,15 @@ class EvaluationVisualizer:
         return save_path
     
     def plot_pigan_evaluation(self, results: Dict[str, Any], 
-                             data_samples: Optional[Dict] = None) -> str:
+                             data_samples: Optional[Dict] = None,
+                             score_distributions: Optional[Dict] = None) -> str:
         """
         绘制PI-GAN评估结果
         
         Args:
             results: PI-GAN评估结果
             data_samples: 数据样本（可选）
+            score_distributions: 得分分布（可选）
             
         Returns:
             保存的图片路径
@@ -313,12 +315,10 @@ class EvaluationVisualizer:
         
         # 4. 判别器得分分布
         ax5 = fig.add_subplot(gs[2, :2])
-        if 'real_scores' in results.get('score_distributions', {}):
-            score_data = results['score_distributions']
-            
-            ax5.hist(score_data['real_scores'], bins=30, alpha=0.6, 
+        if score_distributions and 'real_scores' in score_distributions:
+            ax5.hist(score_distributions['real_scores'], bins=30, alpha=0.6, 
                     label='真实样本得分', color=self.colors['real'])
-            ax5.hist(score_data['fake_scores'], bins=30, alpha=0.6, 
+            ax5.hist(score_distributions['fake_scores'], bins=30, alpha=0.6, 
                     label='生成样本得分', color=self.colors['pred'])
             
             ax5.axvline(0.5, color='black', linestyle='--', label='决策边界')
@@ -327,18 +327,26 @@ class EvaluationVisualizer:
             ax5.set_title('判别器得分分布')
             ax5.legend()
         
-        # 5. 训练损失曲线 (如果有历史数据)
+        # 5. 物理一致性得分分布（如果有）
         ax6 = fig.add_subplot(gs[2, 2:])
-        if 'training_history' in results:
-            history = results['training_history']
-            epochs = range(len(history['g_losses']))
-            
-            ax6.plot(epochs, history['g_losses'], label='生成器损失', color=self.colors['real'])
-            ax6.plot(epochs, history['d_losses'], label='判别器损失', color=self.colors['pred'])
-            
-            ax6.set_xlabel('训练轮数')
-            ax6.set_ylabel('损失值')
-            ax6.set_title('训练损失曲线')
+        if score_distributions and 'physics_scores' in score_distributions:
+            ax6.hist(score_distributions['physics_scores'], bins=30, alpha=0.6, 
+                    label='物理一致性得分', color=self.colors['target'])
+            ax6.axvline(np.mean(score_distributions['physics_scores']), color='red', linestyle='--',
+                       label=f'平均得分: {np.mean(score_distributions["physics_scores"]):.3f}')
+            ax6.axvline(0.3, color='black', linestyle='--', label='目标阈值 (0.3)')
+            ax6.set_xlabel('物理一致性得分')
+            ax6.set_ylabel('频次')
+            ax6.set_title('生成样本物理一致性分布')
+            ax6.legend()
+        elif 'physics_consistency' in results:
+            physics_score_mean = results['physics_consistency']['physics_score_mean']
+            physics_score_std = results['physics_consistency']['physics_score_std']
+            ax6.bar(['物理一致性得分'], [physics_score_mean], 
+                   yerr=[physics_score_std], capsize=5, color=self.colors['target'])
+            ax6.axhline(y=0.3, color='black', linestyle='--', label='目标阈值 (0.3)')
+            ax6.set_ylabel('得分')
+            ax6.set_title('平均物理一致性得分')
             ax6.legend()
         
         # 6. 综合性能评估
@@ -354,6 +362,14 @@ class EvaluationVisualizer:
             disc_acc,
             (param_r2 + disc_acc) / 2
         ]
+        
+        # 如果有物理一致性评估，也加入
+        if 'physics_consistency' in results:
+            physics_score = 1 - results['physics_consistency']['physics_score_mean']  # 反向评分
+            performance_categories.append('物理一致性')
+            performance_scores.append(physics_score)
+            performance_categories[2] = '平均性能'  # 更新整体性能名称
+            performance_scores[2] = np.mean(performance_scores)  # 更新整体性能计算
         
         # 性能等级判断
         ratings = []

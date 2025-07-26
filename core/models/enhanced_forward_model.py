@@ -3,288 +3,143 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
-class EnhancedForwardModel(nn.Module):
+class EnhancedForwardPINN(nn.Module):
     """
-    增强版前向模型：使用多分支架构分别处理光谱和物理指标预测
+    增强版前向PINN模型：
+    输入：4维结构参数(r1,r2,w,g)
+    输出：250点透射光谱 + 物理约束残差
     """
-    def __init__(self, input_param_dim, output_spectrum_dim, output_metrics_dim):
-        super(EnhancedForwardModel, self).__init__()
+    
+    def __init__(self, input_param_dim: int = 4, spectrum_dim: int = 250, fourier_dim: int = 32):
+        super(EnhancedForwardPINN, self).__init__()
+        self.input_param_dim = input_param_dim
+        self.spectrum_dim = spectrum_dim
+        self.fourier_dim = fourier_dim
         
-        self.output_spectrum_dim = output_spectrum_dim
-        self.output_metrics_dim = output_metrics_dim
-        
-        # 共享特征提取器
-        self.shared_encoder = nn.Sequential(
-            nn.Linear(input_param_dim, 128),
-            nn.LayerNorm(128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(128, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(256, 512),
-            nn.LayerNorm(512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-        )
-        
-        # 光谱预测分支
-        self.spectrum_branch = nn.Sequential(
-            nn.Linear(512, 1024),
-            nn.LayerNorm(1024),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.3),
-            
-            nn.Linear(1024, 2048),
-            nn.LayerNorm(2048),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.3),
-            
-            nn.Linear(2048, 1024),
-            nn.LayerNorm(1024),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(1024, output_spectrum_dim),
-            # 不使用激活函数，因为光谱值可能为负
-        )
-        
-        # 物理指标预测分支
-        self.metrics_branch = nn.Sequential(
-            nn.Linear(512, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(256, 128),
-            nn.LayerNorm(128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(128, 64),
-            nn.LayerNorm(64),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.1),
-            
-            nn.Linear(64, output_metrics_dim),
-            # 不使用激活函数，保持原始输出范围
-        )
-        
-    def forward(self, structural_params_norm):
-        # 共享特征提取
-        shared_features = self.shared_encoder(structural_params_norm)
-        
-        # 分支预测
-        predicted_spectrum = self.spectrum_branch(shared_features)
-        predicted_metrics = self.metrics_branch(shared_features)
-        
-        return predicted_spectrum, predicted_metrics
-
-class PhysicsInformedForwardModel(nn.Module):
-    """
-    物理信息前向模型：集成物理约束的前向模型
-    """
-    def __init__(self, input_param_dim, output_spectrum_dim, output_metrics_dim):
-        super(PhysicsInformedForwardModel, self).__init__()
-        
-        self.output_spectrum_dim = output_spectrum_dim
-        self.output_metrics_dim = output_metrics_dim
-        
-        # 参数嵌入层
-        self.param_embedding = nn.Sequential(
+        # 参数特征提取模块 (4→64→128→256)
+        self.param_feature_extractor = nn.Sequential(
             nn.Linear(input_param_dim, 64),
-            nn.LayerNorm(64),
-            nn.ReLU(inplace=True),
+            nn.SiLU(),
             nn.Linear(64, 128),
-            nn.LayerNorm(128),
-            nn.ReLU(inplace=True),
-        )
-        
-        # 物理约束层：编码物理规律
-        self.physics_encoder = nn.Sequential(
+            nn.SiLU(),
             nn.Linear(128, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(256, 512),
-            nn.LayerNorm(512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
+            nn.SiLU()
         )
         
-        # 光谱生成器：基于物理原理生成光谱
+        # 傅里叶特征编码器
+        self.B = nn.Parameter(torch.randn(16, 1) * 10, requires_grad=False)  # 固定高斯矩阵
+        self.freq_encoder = nn.Sequential(
+            nn.Linear(16 * 2, fourier_dim),  # sin/cos各16维
+            nn.SiLU()
+        )
+        
+        # 频谱生成核心 (带残差块)
         self.spectrum_generator = nn.Sequential(
-            nn.Linear(512, 1024),
-            nn.LayerNorm(1024),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.3),
-            
-            nn.Linear(1024, 2048),
-            nn.LayerNorm(2048),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.3),
-            
-            nn.Linear(2048, 1024),
-            nn.LayerNorm(1024),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(1024, output_spectrum_dim),
-        )
-        
-        # 指标预测器：基于物理参数预测性能指标
-        self.metrics_predictor = nn.Sequential(
+            nn.Linear(256 + fourier_dim, 512),
+            nn.SiLU(),
+            ResidualBlock(512, 0.3),  # 带缩放因子的残差块
             nn.Linear(512, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(256, 128),
-            nn.LayerNorm(128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(128, output_metrics_dim),
+            nn.SiLU(),
+            ResidualBlock(256, 0.3),
+            nn.Linear(256, spectrum_dim)
         )
         
-        # 注意力机制：加权融合不同物理特征
-        self.attention = nn.MultiheadAttention(
-            embed_dim=512,
-            num_heads=8,
-            dropout=0.1,
-            batch_first=True
-        )
-        
-    def forward(self, structural_params_norm):
-        batch_size = structural_params_norm.size(0)
-        
-        # 参数嵌入
-        param_embed = self.param_embedding(structural_params_norm)
-        
-        # 物理约束编码
-        physics_features = self.physics_encoder(param_embed)
-        
-        # 自注意力机制
-        attn_input = physics_features.unsqueeze(1)  # (batch_size, 1, 512)
-        attn_output, _ = self.attention(attn_input, attn_input, attn_input)
-        enhanced_features = attn_output.squeeze(1)  # (batch_size, 512)
-        
-        # 分别预测光谱和指标
-        predicted_spectrum = self.spectrum_generator(enhanced_features)
-        predicted_metrics = self.metrics_predictor(enhanced_features)
-        
-        return predicted_spectrum, predicted_metrics
-
-class UncertaintyForwardModel(nn.Module):
-    """
-    不确定性前向模型：显式建模预测不确定性
-    """
-    def __init__(self, input_param_dim, output_spectrum_dim, output_metrics_dim):
-        super(UncertaintyForwardModel, self).__init__()
-        
-        self.output_spectrum_dim = output_spectrum_dim
-        self.output_metrics_dim = output_metrics_dim
-        
-        # 特征提取器
-        self.feature_extractor = nn.Sequential(
-            nn.Linear(input_param_dim, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(256, 512),
-            nn.LayerNorm(512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(512, 1024),
-            nn.LayerNorm(1024),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-        )
-        
-        # 光谱均值预测
-        self.spectrum_mean = nn.Sequential(
-            nn.Linear(1024, 2048),
-            nn.LayerNorm(2048),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.3),
-            nn.Linear(2048, output_spectrum_dim),
-        )
-        
-        # 光谱方差预测
-        self.spectrum_var = nn.Sequential(
-            nn.Linear(1024, 1024),
-            nn.LayerNorm(1024),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            nn.Linear(1024, output_spectrum_dim),
-            nn.Softplus()  # 确保方差为正
-        )
-        
-        # 指标均值预测
-        self.metrics_mean = nn.Sequential(
-            nn.Linear(1024, 256),
-            nn.LayerNorm(256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            nn.Linear(256, output_metrics_dim),
-        )
-        
-        # 指标方差预测
-        self.metrics_var = nn.Sequential(
-            nn.Linear(1024, 128),
-            nn.LayerNorm(128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.1),
-            nn.Linear(128, output_metrics_dim),
-            nn.Softplus()  # 确保方差为正
-        )
-        
-    def forward(self, structural_params_norm):
-        # 提取特征
-        features = self.feature_extractor(structural_params_norm)
-        
-        # 预测均值和方差
-        spectrum_mean = self.spectrum_mean(features)
-        spectrum_var = self.spectrum_var(features)
-        
-        metrics_mean = self.metrics_mean(features)
-        metrics_var = self.metrics_var(features)
-        
-        # 在训练时返回均值，在推理时可以采样
-        if self.training:
-            return spectrum_mean, metrics_mean
-        else:
-            # 可以根据需要返回不确定性信息
-            return spectrum_mean, metrics_mean, spectrum_var, metrics_var
-
-    def sample_predictions(self, structural_params_norm, num_samples=100):
+    def forward(self, structural_params: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        使用预测的均值和方差进行蒙特卡洛采样
+        前向传播
+        Args:
+            structural_params: 归一化的结构参数 (batch_size, 4)
+        Returns:
+            tuple: (predicted_spectrum, physics_residual)
         """
-        features = self.feature_extractor(structural_params_norm)
+        batch_size = structural_params.shape[0]
         
-        spectrum_mean = self.spectrum_mean(features)
-        spectrum_var = self.spectrum_var(features)
+        # 参数特征提取
+        param_features = self.param_feature_extractor(structural_params)  # (batch, 256)
         
-        metrics_mean = self.metrics_mean(features)
-        metrics_var = self.metrics_var(features)
+        # 生成频率坐标
+        freq_coords = torch.linspace(0.5, 3.0, self.spectrum_dim).to(structural_params.device)  # (250,)
         
-        # 蒙特卡洛采样
-        spectrum_samples = []
-        metrics_samples = []
+        # 傅里叶特征编码
+        freq_features = []
+        for i in range(self.spectrum_dim):
+            x = freq_coords[i].view(1, 1)
+            # 计算傅里叶特征
+            fx = torch.cat([torch.sin(2 * np.pi * x @ self.B.T), 
+                           torch.cos(2 * np.pi * x @ self.B.T)], dim=1)  # (1, 32)
+            freq_features.append(self.freq_encoder(fx))  # (1, fourier_dim)
         
-        for _ in range(num_samples):
-            spectrum_sample = torch.normal(spectrum_mean, spectrum_var.sqrt())
-            metrics_sample = torch.normal(metrics_mean, metrics_var.sqrt())
+        freq_features = torch.cat(freq_features, dim=0)  # (250, fourier_dim)
+        freq_features = freq_features.unsqueeze(0).repeat(batch_size, 1, 1)  # (batch, 250, fourier_dim)
+        
+        # 频谱生成
+        spectra = []
+        for i in range(self.spectrum_dim):
+            # 融合参数特征和频率编码
+            combined_features = torch.cat([
+                param_features,  # (batch, 256)
+                freq_features[:, i, :]  # (batch, fourier_dim)
+            ], dim=1)  # (batch, 256+fourier_dim)
             
-            spectrum_samples.append(spectrum_sample)
-            metrics_samples.append(metrics_sample)
+            # 生成单个频率点的光谱值
+            spectrum_point = self.spectrum_generator(combined_features)  # (batch, 1)
+            spectra.append(spectrum_point)
+            
+        predicted_spectrum = torch.cat(spectra, dim=1)  # (batch, 250)
         
-        return torch.stack(spectrum_samples), torch.stack(metrics_samples)
+        # 计算物理约束残差（仅在共振峰区域）
+        physics_residual = self.compute_physics_residual(predicted_spectrum, structural_params)
+        
+        return predicted_spectrum, physics_residual
+    
+    def compute_physics_residual(self, spectrum: torch.Tensor, params: torch.Tensor) -> torch.Tensor:
+        """
+        计算区域化物理约束残差（仅在共振峰区域）
+        """
+        # 简化版麦克斯韦方程残差计算
+        # 找到共振峰位置（透射率极小值点）
+        batch_size = spectrum.shape[0]
+        residuals = []
+        
+        for i in range(batch_size):
+            # 找到局部极小值点
+            spec = spectrum[i]
+            # 简化处理：假设共振峰在特定频率范围内
+            # 实际应用中需要更复杂的峰值检测算法
+            peak_regions = [(80, 120), (180, 220)]  # 假设两个共振峰区域
+            
+            region_residuals = []
+            for start, end in peak_regions:
+                region_spec = spec[start:end]
+                # 计算二阶导数作为平滑性约束
+                if len(region_spec) >= 3:
+                    diff1 = region_spec[1:] - region_spec[:-1]
+                    diff2 = diff1[1:] - diff1[:-1]
+                    region_residual = torch.mean(diff2 ** 2)
+                    region_residuals.append(region_residual)
+            
+            if region_residuals:
+                residuals.append(torch.mean(torch.stack(region_residuals)))
+            else:
+                residuals.append(torch.tensor(0.0, device=spectrum.device))
+        
+        return torch.stack(residuals)
+
+
+class ResidualBlock(nn.Module):
+    """
+    带缩放因子的残差块
+    """
+    def __init__(self, dim: int, scale_factor: float = 0.3):
+        super(ResidualBlock, self).__init__()
+        self.scale_factor = scale_factor
+        self.layer = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.SiLU(),
+            nn.Linear(dim, dim)
+        )
+        
+    def forward(self, x):
+        return x + self.scale_factor * self.layer(x)

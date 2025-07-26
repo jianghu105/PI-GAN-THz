@@ -87,6 +87,9 @@ LAMBDA_BNN_KL = 0.0          # BNN KL 散度损失权重 (如果模型包含 Bay
 LAMBDA_PHYSICS_SPECTRUM = 10.0 # 物理一致性损失 - 光谱部分
 LAMBDA_PHYSICS_METRICS = 1.0   # 物理一致性损失 - 指标部分
 
+# 增强模型特定的权重
+LAMBDA_PHYSICS_RESIDUAL = 0.1  # 物理残差损失权重
+
 
 # --- 8. 辅助函数 (可选，但推荐) ---
 def create_directories():

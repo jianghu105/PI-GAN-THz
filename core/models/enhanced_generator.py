@@ -6,165 +6,93 @@ import torch.nn.functional as F
 
 class EnhancedGenerator(nn.Module):
     """
-    增强版生成器：结合1D卷积和注意力机制处理光谱数据
+    增强版生成器：
+    输入：目标光谱(250维) + 潜在向量(100维)
+    输出：4维结构参数(r1,r2,w,g)
+    
     """
-    def __init__(self, input_dim, output_dim, use_attention=True):
+    
+    def __init__(self, spectrum_dim: int = 250, z_dim: int = 100, output_dim: int = 4):
         super(EnhancedGenerator, self).__init__()
-        self.input_dim = input_dim
+        self.spectrum_dim = spectrum_dim
+        self.z_dim = z_dim
         self.output_dim = output_dim
-        self.use_attention = use_attention
         
-        # 1D卷积层：提取光谱特征
-        self.conv_layers = nn.Sequential(
-            # 第一个卷积块
-            nn.Conv1d(1, 64, kernel_size=7, padding=3),
-            nn.BatchNorm1d(64),
-            nn.ReLU(inplace=True),
-            nn.MaxPool1d(2),
-            
-            # 第二个卷积块
-            nn.Conv1d(64, 128, kernel_size=5, padding=2),
-            nn.BatchNorm1d(128),
-            nn.ReLU(inplace=True),
-            nn.MaxPool1d(2),
-            
-            # 第三个卷积块
-            nn.Conv1d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm1d(256),
-            nn.ReLU(inplace=True),
-            nn.AdaptiveAvgPool1d(32),  # 固定输出长度
+        # 光谱特征提取分支 (1D CNN)
+        self.spectrum_feature_extractor = nn.Sequential(
+            nn.Conv1d(1, 16, kernel_size=5, stride=2, padding=2),  # 匹配共振峰宽度
+            nn.BatchNorm1d(16),
+            nn.LeakyReLU(0.2),
+            nn.Conv1d(16, 32, kernel_size=5, stride=2, padding=2),
+            nn.BatchNorm1d(32),
+            nn.LeakyReLU(0.2),
+            nn.AdaptiveAvgPool1d(64)  # 降低维度并聚焦关键特征
         )
         
-        # 计算卷积后的特征维度
-        conv_output_dim = 256 * 32  # 256 channels * 32 length
-        
-        # 注意力机制
-        if self.use_attention:
-            self.attention = nn.MultiheadAttention(
-                embed_dim=256, 
-                num_heads=8, 
-                dropout=0.1,
-                batch_first=True
-            )
-            
-        # 全连接层：深度特征提取
-        self.fc_layers = nn.Sequential(
-            nn.Linear(conv_output_dim, 1024),
-            nn.BatchNorm1d(1024),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.3),
-            
-            nn.Linear(1024, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.3),
-            
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(128, output_dim),
-            nn.Tanh()  # 输出归一化到[-1, 1]
+        # 潜在向量处理分支
+        self.latent_processor = nn.Sequential(
+            nn.Linear(z_dim, 128),
+            nn.LeakyReLU(0.2),
+            nn.Dropout(0.3)  # 防止小数据集过拟合
         )
         
-    def forward(self, spectrum):
-        batch_size = spectrum.size(0)
-        
-        # 确保输入是2D的
-        if spectrum.dim() > 2:
-            spectrum = spectrum.view(batch_size, -1)
-            
-        # 为1D卷积添加channel维度
-        x = spectrum.unsqueeze(1)  # (batch_size, 1, spectrum_length)
-        
-        # 1D卷积特征提取
-        conv_features = self.conv_layers(x)  # (batch_size, 256, 32)
-        
-        # 注意力机制
-        if self.use_attention:
-            # 调整维度用于注意力计算
-            attn_input = conv_features.permute(0, 2, 1)  # (batch_size, 32, 256)
-            attn_output, _ = self.attention(attn_input, attn_input, attn_input)
-            conv_features = attn_output.permute(0, 2, 1)  # (batch_size, 256, 32)
-        
-        # 展平特征
-        flattened = conv_features.view(batch_size, -1)
-        
-        # 全连接层处理
-        output = self.fc_layers(flattened)
-        
-        return output
-
-class ResidualBlock(nn.Module):
-    """残差块：增强网络表达能力"""
-    def __init__(self, dim):
-        super(ResidualBlock, self).__init__()
-        self.block = nn.Sequential(
-            nn.Linear(dim, dim),
-            nn.BatchNorm1d(dim),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            nn.Linear(dim, dim),
-            nn.BatchNorm1d(dim)
-        )
-        self.relu = nn.ReLU(inplace=True)
-        
-    def forward(self, x):
-        residual = x
-        out = self.block(x)
-        out += residual
-        out = self.relu(out)
-        return out
-
-class ResidualGenerator(nn.Module):
-    """
-    基于残差连接的生成器
-    """
-    def __init__(self, input_dim, output_dim, num_residual_blocks=3):
-        super(ResidualGenerator, self).__init__()
-        
-        # 输入投影层
-        self.input_projection = nn.Sequential(
-            nn.Linear(input_dim, 512),
-            nn.BatchNorm1d(512),
-            nn.ReLU(inplace=True)
+        # 特征融合模块
+        self.feature_fusion = nn.Sequential(
+            nn.Linear(32 * 64 + 128, 256),  # 32*64是光谱特征维度，128是潜在向量维度
+            nn.LayerNorm(256),  # LayerNorm替代BatchNorm
+            nn.LeakyReLU(0.2),
+            nn.Linear(256, 256),
+            nn.LayerNorm(256),
+            nn.LeakyReLU(0.2)
         )
         
-        # 残差块
-        self.residual_blocks = nn.ModuleList([
-            ResidualBlock(512) for _ in range(num_residual_blocks)
-        ])
+        # 物理约束输出层
+        self.physical_output = nn.Linear(256, output_dim)
         
-        # 输出层
-        self.output_layers = nn.Sequential(
-            nn.Linear(512, 256),
-            nn.BatchNorm1d(256),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.3),
-            
-            nn.Linear(256, 128),
-            nn.BatchNorm1d(128),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            
-            nn.Linear(128, output_dim),
-            nn.Tanh()
-        )
+    def forward(self, target_spectrum: torch.Tensor, latent_vector: torch.Tensor) -> torch.Tensor:
+        """
+        前向传播
+        Args:
+            target_spectrum: 目标光谱 (batch_size, 250)
+            latent_vector: 潜在向量 (batch_size, 100)
+        Returns:
+            predicted_params: 预测的结构参数 (batch_size, 4)
+        """
+        batch_size = target_spectrum.shape[0]
         
-    def forward(self, spectrum):
-        if spectrum.dim() > 2:
-            spectrum = spectrum.view(spectrum.size(0), -1)
-            
-        x = self.input_projection(spectrum)
+        # 光谱特征提取
+        spectrum_input = target_spectrum.unsqueeze(1)  # (batch, 1, 250)
+        spectrum_features = self.spectrum_feature_extractor(spectrum_input)  # (batch, 32, 64)
+        spectrum_features = spectrum_features.view(batch_size, -1)  # (batch, 32*64)
         
-        for block in self.residual_blocks:
-            x = block(x)
-            
-        output = self.output_layers(x)
-        return output
+        # 潜在向量处理
+        latent_features = self.latent_processor(latent_vector)  # (batch, 128)
+        
+        # 特征融合
+        combined_features = torch.cat([spectrum_features, latent_features], dim=1)  # (batch, 32*64+128)
+        fused_features = self.feature_fusion(combined_features)  # (batch, 256)
+        
+        # 物理约束输出
+        raw_params = self.physical_output(fused_features)  # (batch, 4)
+        
+        # 应用物理边界约束
+        constrained_params = self.apply_physical_constraints(raw_params)
+        
+        return constrained_params
+    
+    def apply_physical_constraints(self, raw_params: torch.Tensor) -> torch.Tensor:
+        """
+        应用硬编码物理边界约束
+        """
+        # r1: 0.5-5μm (sigmoid约束)
+        r1 = 0.5 + 4.5 * torch.sigmoid(raw_params[:, 0])
+        
+        # r2: <0.9×r1 (确保r2<r1)
+        r2_raw = torch.sigmoid(raw_params[:, 1])
+        r2 = r2_raw * 0.9 * r1
+        
+        # w, g: >0 (softplus约束)
+        w = F.softplus(raw_params[:, 2])
+        g = F.softplus(raw_params[:, 3])
+        
+        return torch.stack([r1, r2, w, g], dim=1)

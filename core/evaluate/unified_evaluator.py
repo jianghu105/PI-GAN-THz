@@ -21,6 +21,12 @@ if project_root not in sys.path:
 from core.models.generator import Generator
 from core.models.discriminator import Discriminator
 from core.models.forward_model import ForwardModel
+
+# 导入增强模型
+from core.models.enhanced_generator import EnhancedGenerator
+from core.models.enhanced_discriminator import EnhancedDiscriminator
+from core.models.enhanced_forward_model import EnhancedForwardPINN
+
 import config.config as cfg
 from core.utils.data_loader import MetamaterialDataset, denormalize_params, denormalize_metrics, normalize_spectrum
 from core.utils.set_seed import set_seed
@@ -43,7 +49,6 @@ class UnifiedEvaluator:
         self.generator = None
         self.discriminator = None
         self.forward_model = None
-        self.dataset = None
         self.evaluation_results = {}
         
         # 初始化可视化器
@@ -108,6 +113,71 @@ class UnifiedEvaluator:
             
         except Exception as e:
             print(f"✗ Error loading models: {e}")
+            return False
+    
+    def load_models_enhanced(self, model_dir: str = None) -> bool:
+        """
+        加载增强版训练好的模型
+        
+        Args:
+            model_dir: 模型保存目录
+            
+        Returns:
+            bool: 加载是否成功
+        """
+        if model_dir is None:
+            model_dir = cfg.SAVED_MODELS_DIR
+            
+        print(f"Loading enhanced models from: {model_dir}")
+        
+        try:
+            # 初始化增强模型
+            self.generator = EnhancedGenerator(
+                spectrum_dim=cfg.SPECTRUM_DIM,
+                z_dim=cfg.Z_DIM,
+                output_dim=cfg.GENERATOR_OUTPUT_PARAM_DIM
+            ).to(self.device)
+            
+            self.discriminator = EnhancedDiscriminator(
+                spectrum_dim=cfg.DISCRIMINATOR_INPUT_SPEC_DIM,
+                param_dim=cfg.DISCRIMINATOR_INPUT_PARAM_DIM
+            ).to(self.device)
+            
+            self.forward_model = EnhancedForwardPINN(
+                input_param_dim=cfg.FORWARD_MODEL_INPUT_DIM,
+                spectrum_dim=cfg.FORWARD_MODEL_OUTPUT_SPEC_DIM
+            ).to(self.device)
+            
+            # 加载权重
+            gen_path = os.path.join(model_dir, "generator_enhanced_final.pth")
+            disc_path = os.path.join(model_dir, "discriminator_enhanced_final.pth")
+            fwd_path = os.path.join(model_dir, "forward_model_enhanced_final.pth")
+            
+            # 如果增强模型不存在，尝试加载原始模型
+            if not all(os.path.exists(p) for p in [gen_path, disc_path, fwd_path]):
+                print("Enhanced model files not found, trying original models...")
+                gen_path = os.path.join(model_dir, "generator_final.pth")
+                disc_path = os.path.join(model_dir, "discriminator_final.pth")
+                fwd_path = os.path.join(model_dir, "forward_model_final.pth")
+                
+            if not all(os.path.exists(p) for p in [gen_path, disc_path, fwd_path]):
+                print("Error: Model files not found!")
+                return False
+                
+            self.generator.load_state_dict(torch.load(gen_path, map_location=self.device))
+            self.discriminator.load_state_dict(torch.load(disc_path, map_location=self.device))
+            self.forward_model.load_state_dict(torch.load(fwd_path, map_location=self.device))
+            
+            # 设置为评估模式
+            self.generator.eval()
+            self.discriminator.eval()
+            self.forward_model.eval()
+            
+            print("✓ Enhanced models loaded successfully!")
+            return True
+            
+        except Exception as e:
+            print(f"✗ Error loading enhanced models: {e}")
             return False
     
     def load_dataset(self, data_path: str = None) -> bool:
@@ -217,7 +287,11 @@ class UnifiedEvaluator:
                 real_metrics_norm = real_metrics_norm.to(self.device)
                 
                 # 前向模型预测
-                pred_spectrum, pred_metrics_norm = self.forward_model(real_params_norm)
+                if isinstance(self.forward_model, EnhancedForwardPINN):
+                    pred_spectrum, _ = self.forward_model(real_params_norm)
+                    pred_metrics_norm = torch.zeros_like(real_metrics_norm)  # 简化处理
+                else:
+                    pred_spectrum, pred_metrics_norm = self.forward_model(real_params_norm)
                 pred_metrics_denorm = denormalize_metrics(pred_metrics_norm, self.dataset.metric_ranges)
                 
                 # 收集结果
@@ -289,12 +363,20 @@ class UnifiedEvaluator:
                 real_params_norm = real_params_norm.to(self.device)
                 
                 # 生成器预测参数
-                pred_params_norm = self.generator(real_spectrum)
+                if isinstance(self.generator, EnhancedGenerator):
+                    latent_vector = torch.randn(real_spectrum.shape[0], cfg.Z_DIM).to(self.device)
+                    pred_params_norm = self.generator(real_spectrum, latent_vector)
+                else:
+                    pred_params_norm = self.generator(real_spectrum)
                 pred_params_denorm = denormalize_params(pred_params_norm, self.dataset.param_ranges)
                 
                 # 判别器评分
-                real_scores = self.discriminator(real_spectrum, real_params_denorm)
-                fake_scores = self.discriminator(real_spectrum, pred_params_denorm)
+                if isinstance(self.discriminator, EnhancedDiscriminator):
+                    real_scores, _ = self.discriminator(real_spectrum, real_params_denorm)
+                    fake_scores, _ = self.discriminator(real_spectrum, pred_params_denorm)
+                else:
+                    real_scores = self.discriminator(real_spectrum, real_params_denorm)
+                    fake_scores = self.discriminator(real_spectrum, pred_params_denorm)
                 
                 # 收集结果
                 all_real_params.append(real_params_denorm.cpu().numpy())
@@ -342,6 +424,114 @@ class UnifiedEvaluator:
         
         return results
     
+    def evaluate_pigan_enhanced(self, num_samples: int = 1000) -> Dict[str, Any]:
+        """
+        评估增强版PI-GAN性能（生成器、判别器和物理一致性）
+        
+        Args:
+            num_samples: 评估样本数
+            
+        Returns:
+            Dict[str, Any]: 增强版PI-GAN评估结果
+        """
+        print(f"\n=== Enhanced PI-GAN Evaluation ({num_samples} samples) ===")
+        
+        if not all([self.generator, self.discriminator, self.forward_model, self.dataset]):
+            raise ValueError("All models and dataset must be loaded first!")
+        
+        # 确认使用的是增强模型
+        if not (isinstance(self.generator, EnhancedGenerator) and 
+                isinstance(self.discriminator, EnhancedDiscriminator)):
+            print("Warning: Models are not enhanced versions. Using standard evaluation.")
+            return self.evaluate_pigan(num_samples)
+        
+        # 随机采样
+        sample_indices = np.random.choice(len(self.dataset), min(num_samples, len(self.dataset)), replace=False)
+        subset = Subset(self.dataset, sample_indices)
+        dataloader = DataLoader(subset, batch_size=64, shuffle=False)
+        
+        # 生成器评估
+        all_real_params = []
+        all_pred_params = []
+        all_real_scores = []
+        all_fake_scores = []
+        all_physics_scores = []
+        
+        with torch.no_grad():
+            for batch in dataloader:
+                real_spectrum, real_params_denorm, real_params_norm, _, _ = batch
+                
+                real_spectrum = real_spectrum.to(self.device)
+                real_params_denorm = real_params_denorm.to(self.device)
+                real_params_norm = real_params_norm.to(self.device)
+                
+                # 生成器预测参数
+                latent_vector = torch.randn(real_spectrum.shape[0], cfg.Z_DIM).to(self.device)
+                pred_params_norm = self.generator(real_spectrum, latent_vector)
+                pred_params_denorm = denormalize_params(pred_params_norm, self.dataset.param_ranges)
+                
+                # 判别器评分
+                real_scores_rf, real_scores_physics = self.discriminator(real_spectrum, real_params_denorm)
+                fake_scores_rf, fake_scores_physics = self.discriminator(real_spectrum, pred_params_denorm)
+                
+                # 收集结果
+                all_real_params.append(real_params_denorm.cpu().numpy())
+                all_pred_params.append(pred_params_denorm.cpu().numpy())
+                all_real_scores.append(real_scores_rf.cpu().numpy())
+                all_fake_scores.append(fake_scores_rf.cpu().numpy())
+                all_physics_scores.append(fake_scores_physics.cpu().numpy())
+        
+        # 合并结果
+        all_real_params = np.concatenate(all_real_params, axis=0)
+        all_pred_params = np.concatenate(all_pred_params, axis=0)
+        all_real_scores = np.concatenate(all_real_scores, axis=0)
+        all_fake_scores = np.concatenate(all_fake_scores, axis=0)
+        all_physics_scores = np.concatenate(all_physics_scores, axis=0)
+        
+        # 计算评估指标
+        param_metrics = self.calculate_metrics(all_real_params, all_pred_params)
+        
+        # 判别器性能
+        real_accuracy = np.mean(all_real_scores > 0.5)
+        fake_accuracy = np.mean(all_fake_scores < 0.5)
+        overall_accuracy = (real_accuracy + fake_accuracy) / 2
+        
+        # 物理一致性性能
+        physics_score_mean = np.mean(all_physics_scores)
+        physics_score_std = np.std(all_physics_scores)
+        
+        results = {
+            'parameter_prediction': param_metrics,
+            'discriminator_performance': {
+                'real_accuracy': real_accuracy,
+                'fake_accuracy': fake_accuracy,
+                'overall_accuracy': overall_accuracy,
+                'real_score_mean': np.mean(all_real_scores),
+                'fake_score_mean': np.mean(all_fake_scores)
+            },
+            'physics_consistency': {
+                'physics_score_mean': physics_score_mean,
+                'physics_score_std': physics_score_std
+            },
+            'num_samples': len(all_real_params),
+            'data_samples': {
+                'real_params': all_real_params[:50],  # 保存前50个样本用于可视化
+                'pred_params': all_pred_params[:50]
+            },
+            'score_distributions': {
+                'real_scores': all_real_scores[:200],  # 保存前200个得分用于可视化
+                'fake_scores': all_fake_scores[:200],
+                'physics_scores': all_physics_scores[:200]
+            }
+        }
+        
+        print(f"✓ Enhanced PI-GAN evaluation completed")
+        print(f"  - Parameter R²: {param_metrics['r2']:.4f}")
+        print(f"  - Discriminator Accuracy: {overall_accuracy:.4f}")
+        print(f"  - Physics Consistency Score: {physics_score_mean:.4f}")
+        
+        return results
+    
     def evaluate_structural_prediction(self, num_samples: int = 100) -> Dict[str, Any]:
         """
         评估结构预测能力
@@ -374,14 +564,21 @@ class UnifiedEvaluator:
                 real_params_norm = real_params_norm.to(self.device)
                 
                 # 生成器预测参数
-                pred_params_norm = self.generator(real_spectrum)
+                if isinstance(self.generator, EnhancedGenerator):
+                    latent_vector = torch.randn(real_spectrum.shape[0], cfg.Z_DIM).to(self.device)
+                    pred_params_norm = self.generator(real_spectrum, latent_vector)
+                else:
+                    pred_params_norm = self.generator(real_spectrum)
                 
                 # 检查参数范围约束
                 range_violations = torch.sum((pred_params_norm < 0) | (pred_params_norm > 1), dim=1).cpu().numpy()
                 param_range_violations.extend(range_violations)
                 
                 # 前向模型重建光谱
-                recon_spectrum, _ = self.forward_model(pred_params_norm)
+                if isinstance(self.forward_model, EnhancedForwardPINN):
+                    recon_spectrum, _ = self.forward_model(pred_params_norm)
+                else:
+                    recon_spectrum, _ = self.forward_model(pred_params_norm)
                 
                 # 重建误差
                 recon_error = torch.mean((real_spectrum - recon_spectrum) ** 2, dim=1).cpu().numpy()
@@ -444,8 +641,16 @@ class UnifiedEvaluator:
                 real_params_norm = real_params_norm.to(self.device)
                 
                 # 循环一致性测试: spectrum -> params -> spectrum
-                pred_params_norm = self.generator(real_spectrum)
-                recon_spectrum, _ = self.forward_model(pred_params_norm)
+                if isinstance(self.generator, EnhancedGenerator):
+                    latent_vector = torch.randn(real_spectrum.shape[0], cfg.Z_DIM).to(self.device)
+                    pred_params_norm = self.generator(real_spectrum, latent_vector)
+                else:
+                    pred_params_norm = self.generator(real_spectrum)
+                
+                if isinstance(self.forward_model, EnhancedForwardPINN):
+                    recon_spectrum, _ = self.forward_model(pred_params_norm)
+                else:
+                    recon_spectrum, _ = self.forward_model(pred_params_norm)
                 
                 cycle_error = torch.mean((real_spectrum - recon_spectrum) ** 2, dim=1).cpu().numpy()
                 cycle_consistency_errors.extend(cycle_error)
@@ -453,7 +658,10 @@ class UnifiedEvaluator:
                 # 预测稳定性测试: 添加小噪声后的预测一致性
                 noise = torch.randn_like(real_spectrum) * 0.01
                 noisy_spectrum = real_spectrum + noise
-                pred_params_noisy = self.generator(noisy_spectrum)
+                if isinstance(self.generator, EnhancedGenerator):
+                    pred_params_noisy = self.generator(noisy_spectrum, latent_vector)
+                else:
+                    pred_params_noisy = self.generator(noisy_spectrum)
                 
                 stability = torch.mean((pred_params_norm - pred_params_noisy) ** 2, dim=1).cpu().numpy()
                 prediction_stability.extend(stability)
@@ -528,6 +736,51 @@ class UnifiedEvaluator:
         
         print(f"\n" + "="*80)
         print(f"EVALUATION COMPLETED in {results['evaluation_time']:.2f}s")
+        print("="*80)
+        
+        return results
+    
+    def run_comprehensive_evaluation_enhanced(self, num_samples: int = 1000) -> Dict[str, Any]:
+        """
+        运行增强版全面评估
+        
+        Args:
+            num_samples: 评估样本数
+            
+        Returns:
+            Dict[str, Any]: 完整评估结果
+        """
+        print("\n" + "="*80)
+        print("ENHANCED PI-GAN COMPREHENSIVE EVALUATION")
+        print("="*80)
+        
+        start_time = time.time()
+        
+        # 检查模型和数据集
+        if not all([self.generator, self.discriminator, self.forward_model, self.dataset]):
+            raise ValueError("All models and dataset must be loaded first!")
+        
+        # 执行各项评估
+        pigan_eval = self.evaluate_pigan_enhanced(num_samples) if isinstance(self.discriminator, EnhancedDiscriminator) else self.evaluate_pigan(num_samples)
+        
+        results = {
+            'forward_network_evaluation': self.evaluate_forward_network(num_samples),
+            'pigan_evaluation': pigan_eval,
+            'structural_prediction_evaluation': self.evaluate_structural_prediction(min(num_samples//2, 500)),
+            'model_validation': self.evaluate_model_validation(min(num_samples//2, 500)),
+            'evaluation_time': time.time() - start_time,
+            'total_samples': num_samples
+        }
+        
+        # 保存结果
+        self.evaluation_results = results
+        
+        # 生成可视化
+        print(f"\n🎨 Generating evaluation visualizations...")
+        self.generate_visualizations(results)
+        
+        print(f"\n" + "="*80)
+        print(f"ENHANCED EVALUATION COMPLETED in {results['evaluation_time']:.2f}s")
         print("="*80)
         
         return results
@@ -627,6 +880,12 @@ class UnifiedEvaluator:
         disc_acc = pigan_results['discriminator_performance']['overall_accuracy']
         report_lines.append(f"Parameter Prediction R²: {param_r2:.4f}")
         report_lines.append(f"Discriminator Accuracy: {disc_acc:.4f}")
+        
+        # 检查是否有物理一致性评估
+        if 'physics_consistency' in pigan_results:
+            physics_score = pigan_results['physics_consistency']['physics_score_mean']
+            report_lines.append(f"Physics Consistency Score: {physics_score:.4f}")
+        
         if param_r2 > 0.8 and disc_acc > 0.8:
             report_lines.append("✓ PI-GAN shows EXCELLENT performance")
         elif param_r2 > 0.6 and disc_acc > 0.7:
@@ -713,6 +972,8 @@ def main():
                         help='Device to use (auto, cpu, cuda)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility')
+    parser.add_argument('--enhanced', action='store_true',
+                        help='Use enhanced models')
     
     args = parser.parse_args()
     
@@ -723,16 +984,24 @@ def main():
     evaluator = UnifiedEvaluator(device=args.device)
     
     # 加载模型和数据
-    if not evaluator.load_models(args.model_dir):
-        print("Failed to load models!")
-        return
+    if args.enhanced:
+        if not evaluator.load_models_enhanced(args.model_dir):
+            print("Failed to load enhanced models!")
+            return
+    else:
+        if not evaluator.load_models(args.model_dir):
+            print("Failed to load models!")
+            return
     
     if not evaluator.load_dataset(args.data_path):
         print("Failed to load dataset!")
         return
     
     # 运行评估
-    results = evaluator.run_comprehensive_evaluation(args.num_samples)
+    if args.enhanced:
+        results = evaluator.run_comprehensive_evaluation_enhanced(args.num_samples)
+    else:
+        results = evaluator.run_comprehensive_evaluation(args.num_samples)
     
     # 生成报告
     evaluator.generate_summary_report()
