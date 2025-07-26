@@ -274,7 +274,7 @@ def plot_pigan_evaluation_enhanced(results):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate enhanced PI-GAN model performance")
     parser.add_argument('--model_dir', type=str, default=None,
-                        help='Directory containing trained models')
+                        help='Directory containing trained enhanced models')
     parser.add_argument('--data_path', type=str, default=None,
                         help='Path to dataset CSV file')
     parser.add_argument('--num_samples', type=int, default=1000,

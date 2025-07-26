@@ -44,7 +44,6 @@ echo "Enhanced PI-GAN training completed successfully!"
 # 3. 评估增强版模型
 echo "Step 3: Evaluating Enhanced Models..."
 python /mnt/d/PI_GAN_THz/core/evaluate/unified_evaluator.py \
-  --enhanced \
   --num_samples 500
 
 # 检查评估是否成功

@@ -336,8 +336,8 @@ if __name__ == '__main__':
     parser.add_argument('--lr_d', type=float, default=cfg.LR_D,
                         help=f'判别器的学习率 (默认: {cfg.LR_D})')
     parser.add_argument('--fwd_model_path', type=str,
-                        default=os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_pretrained.pth"),
-                        help='预训练前向模型的路径。(默认: saved_models/forward_model_pretrained.pth)')
+                        default=os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_enhanced_pretrained.pth"),
+                        help='预训练前向模型的路径。(默认: saved_models/forward_model_enhanced_pretrained.pth)')
     parser.add_argument('--log_interval', type=int, default=10, # <<<<< 新增命令行参数
                         help='每隔多少批次输出一次详细日志和更新进度条后缀 (默认: 10)')
     

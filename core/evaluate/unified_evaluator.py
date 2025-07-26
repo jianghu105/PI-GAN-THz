@@ -18,10 +18,6 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 if project_root not in sys.path:
     sys.path.append(project_root)
 
-from core.models.generator import Generator
-from core.models.discriminator import Discriminator
-from core.models.forward_model import ForwardModel
-
 # 导入增强模型
 from core.models.enhanced_generator import EnhancedGenerator
 from core.models.enhanced_discriminator import EnhancedDiscriminator
@@ -59,7 +55,7 @@ class UnifiedEvaluator:
     
     def load_models(self, model_dir: str = None) -> bool:
         """
-        加载训练好的模型
+        加载训练好的增强模型
         
         Args:
             model_dir: 模型保存目录
@@ -67,53 +63,7 @@ class UnifiedEvaluator:
         Returns:
             bool: 加载是否成功
         """
-        if model_dir is None:
-            model_dir = cfg.SAVED_MODELS_DIR
-            
-        print(f"Loading models from: {model_dir}")
-        
-        try:
-            # 初始化模型
-            self.generator = Generator(
-                input_dim=cfg.SPECTRUM_DIM, 
-                output_dim=cfg.GENERATOR_OUTPUT_PARAM_DIM
-            ).to(self.device)
-            
-            self.discriminator = Discriminator(
-                input_spec_dim=cfg.DISCRIMINATOR_INPUT_SPEC_DIM,
-                input_param_dim=cfg.DISCRIMINATOR_INPUT_PARAM_DIM
-            ).to(self.device)
-            
-            self.forward_model = ForwardModel(
-                input_param_dim=cfg.FORWARD_MODEL_INPUT_DIM,
-                output_spectrum_dim=cfg.FORWARD_MODEL_OUTPUT_SPEC_DIM,
-                output_metrics_dim=cfg.FORWARD_MODEL_OUTPUT_METRICS_DIM
-            ).to(self.device)
-            
-            # 加载权重
-            gen_path = os.path.join(model_dir, "generator_final.pth")
-            disc_path = os.path.join(model_dir, "discriminator_final.pth")
-            fwd_path = os.path.join(model_dir, "forward_model_final.pth")
-            
-            if not all(os.path.exists(p) for p in [gen_path, disc_path, fwd_path]):
-                print("Error: Model files not found!")
-                return False
-                
-            self.generator.load_state_dict(torch.load(gen_path, map_location=self.device))
-            self.discriminator.load_state_dict(torch.load(disc_path, map_location=self.device))
-            self.forward_model.load_state_dict(torch.load(fwd_path, map_location=self.device))
-            
-            # 设置为评估模式
-            self.generator.eval()
-            self.discriminator.eval()
-            self.forward_model.eval()
-            
-            print("✓ Models loaded successfully!")
-            return True
-            
-        except Exception as e:
-            print(f"✗ Error loading models: {e}")
-            return False
+        return self.load_models_enhanced(model_dir)
     
     def load_models_enhanced(self, model_dir: str = None) -> bool:
         """
@@ -972,8 +922,6 @@ def main():
                         help='Device to use (auto, cpu, cuda)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility')
-    parser.add_argument('--enhanced', action='store_true',
-                        help='Use enhanced models')
     
     args = parser.parse_args()
     
@@ -984,24 +932,16 @@ def main():
     evaluator = UnifiedEvaluator(device=args.device)
     
     # 加载模型和数据
-    if args.enhanced:
-        if not evaluator.load_models_enhanced(args.model_dir):
-            print("Failed to load enhanced models!")
-            return
-    else:
-        if not evaluator.load_models(args.model_dir):
-            print("Failed to load models!")
-            return
+    if not evaluator.load_models(args.model_dir):
+        print("Failed to load models!")
+        return
     
     if not evaluator.load_dataset(args.data_path):
         print("Failed to load dataset!")
         return
     
     # 运行评估
-    if args.enhanced:
-        results = evaluator.run_comprehensive_evaluation_enhanced(args.num_samples)
-    else:
-        results = evaluator.run_comprehensive_evaluation(args.num_samples)
+    results = evaluator.run_comprehensive_evaluation_enhanced(args.num_samples)
     
     # 生成报告
     evaluator.generate_summary_report()
