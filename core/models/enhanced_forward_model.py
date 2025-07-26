@@ -43,7 +43,7 @@ class EnhancedForwardPINN(nn.Module):
             nn.Linear(512, 256),
             nn.SiLU(),
             ResidualBlock(256, 0.3),
-            nn.Linear(256, spectrum_dim)
+            nn.Linear(256, 1)  # 每次只生成一个频率点的值
         )
         
     def forward(self, structural_params: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
