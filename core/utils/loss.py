@@ -4,7 +4,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# --- 1. GAN 核心损失 ---
+# 从新的物理约束模块导入损失函数
+from .physics_constraints import (
+    lc_frequency_constraint,
+    maxwell_constraint,
+    energy_conservation_constraint
+)
+
+# --- 1. GAN 核心损失 (保留，可能会在判别器训练中使用) ---
+
 def criterion_bce():
     """
     二元交叉熵损失，用于判别器和生成器的对抗性训练。
@@ -24,124 +32,77 @@ def criterion_mse():
     """
     return nn.MSELoss()
 
-# --- 2. 物理信息和重建损失 ---
+# --- 2. 新的生成器总损失函数 ---
 
-def maxwell_equation_loss(predicted_spectrum: torch.Tensor, frequencies: torch.Tensor, predicted_params_norm: torch.Tensor):
+def generator_total_loss(generator, discriminator, forward_model, z, target_spectrum, epoch, total_epochs=200):
     """
-    麦克斯韦方程组约束损失。
-    这是一个占位符函数，需要根据实际的物理模型进行详细实现。
-    例如，可以鼓励光谱的平滑性、特定的边界条件，或与仿真器数据的梯度匹配等。
+    生成器总损失函数 - 融合物理约束与对抗训练
     
-    此处为简化的示例：惩罚光谱剧烈波动 (鼓励平滑性)，并考虑参数对整体形状的影响。
+    关键设计:
+      1. 三阶段动态平衡: 早期侧重光谱匹配, 后期强化物理约束
+      2. 针对您的SRR结构定制权重
+      3. 金层0.2μm固定的物理模型简化
     
-    Args:
-        predicted_spectrum (torch.Tensor): 预测的太赫兹光谱 (batch_size, num_spectrum_points)。
-        frequencies (torch.Tensor): 对应的频率点 (num_spectrum_points)。
-        predicted_params_norm (torch.Tensor): 归一化的预测结构参数 (batch_size, 4)。
-    Returns:
-        torch.Tensor: 麦克斯韦方程组损失。
+    返回:
+      total_loss: 生成器总损失
+      loss_components: 各损失分量字典
     """
-    # 示例1：光谱平滑性惩罚（二阶导数）
-    # 使用 F.conv1d 或简单的差分计算离散二阶导数
-    # 为了避免边界问题，可以对内部点进行计算
-    if predicted_spectrum.size(1) < 3: # 至少需要3个点才能计算二阶导数
-        return torch.zeros(1, device=predicted_spectrum.device) # 如果点太少，返回0损失
-        
-    # 计算一阶差分
-    diff1 = predicted_spectrum[:, 1:] - predicted_spectrum[:, :-1]
-    # 计算二阶差分 (近似二阶导数)
-    diff2 = diff1[:, 1:] - diff1[:, :-1]
+    # 1. 生成参数
+    # 注意：根据您的设计，生成器可能不需要 target_spectrum 作为输入
+    # 这里假设它需要 z (随机噪声)
+    params = generator(z)
     
-    # 对二阶导数进行 L2 惩罚，鼓励平滑性
-    smoothness_loss = torch.mean(diff2**2)
+    # 2. 通过前向网络获取指标
+    # 假设 forward_model 返回 (spectrum, metrics)
+    recon_spectrum, metrics = forward_model(params, return_metrics=True)
+    f1_pred, q1_pred, _, s1_pred, f2_pred, q2_pred, _, s2_pred = metrics.unbind(1)
     
-    # 示例2：结合参数的某种约束 (占位符，需要具体物理意义)
-    # 例如，可以要求光谱的某些特征（如平均透射率）与参数有特定关系
-    # mean_transmission = torch.mean(predicted_spectrum, dim=1)
-    # param_influence_loss = torch.mean((mean_transmission - (predicted_params_norm[:, 0] * 0.1 + predicted_params_norm[:, 1] * 0.05))**2)
+    # 3. 物理约束损失
+    lc_loss = lc_frequency_constraint(params, f1_pred, f2_pred)
+    maxwell_loss = maxwell_constraint(params, s1_pred, s2_pred)
+    energy_loss = energy_conservation_constraint(q1_pred, q2_pred)
     
-    # 暂时只返回平滑性损失作为麦克斯韦方程组约束的简单代理
-    return smoothness_loss # + param_influence_loss (如果添加了)
+    # 4. 对抗损失
+    # 判别器评估的是 (光谱, 参数) 对的真实性
+    gan_loss = -torch.mean(discriminator(recon_spectrum, params))
+    
+    # 5. 光谱重建损失 (L1 损失对异常值更鲁棒)
+    spectral_loss = F.l1_loss(recon_spectrum, target_spectrum)
+    
+    # 6. 动态权重 (针对您的SRR结构定制)
+    lambda_data = max(0.8 - 0.006 * epoch, 0.2)  # 从0.8→0.2
+    lambda_lc = min(3.0 * epoch / 50, 3.0)  # 从0→3.0
+    lambda_maxwell = min(1.5 * max(epoch - 30, 0) / 70, 1.5)  # 30轮后启动
+    lambda_energy = min(1.0 * max(epoch - 50, 0) / 50, 1.0)  # 50轮后启动
+    
+    # 7. 总损失
+    total_loss = (
+        gan_loss + 
+        lambda_data * spectral_loss + 
+        lambda_lc * lc_loss + 
+        lambda_maxwell * maxwell_loss + 
+        lambda_energy * energy_loss
+    )
+    
+    loss_components = {
+        'gan': gan_loss.item(),
+        'spectral': spectral_loss.item(),
+        'lc': lc_loss.item(),
+        'maxwell': maxwell_loss.item(),
+        'energy': energy_loss.item(),
+        'lambda_data': lambda_data,
+        'lambda_lc': lambda_lc,
+        'lambda_maxwell': lambda_maxwell,
+        'lambda_energy': lambda_energy
+    }
 
+    return total_loss, loss_components
 
-def lc_model_approx_loss(f1_pred_norm: torch.Tensor, f2_pred_norm: torch.Tensor, structural_params_norm: torch.Tensor):
-    """
-    LC 模型近似约束损失。
-    惩罚预测的共振频率 (已归一化) 与基于结构参数的理论或近似物理关系之间的偏差。
-    此处的“理论”关系是简化的线性模型，需要根据实际物理原理或数据分析进行构建和验证。
-    
-    Args:
-        f1_pred_norm (torch.Tensor): 预测的第一个归一化共振频率 (batch_size, 1)。
-        f2_pred_norm (torch.Tensor): 预测的第二个归一化共振频率 (batch_size, 1)。
-        structural_params_norm (torch.Tensor): 归一化结构参数 (batch_size, 4)。
-            结构参数顺序假定为：r1 (idx 0), r2 (idx 1), w (idx 2), g (idx 3)。
-    Returns:
-        torch.Tensor: LC 模型近似损失。
-    """
-    # 提取归一化参数
-    r1_norm = structural_params_norm[:, 0].unsqueeze(1)
-    r2_norm = structural_params_norm[:, 1].unsqueeze(1)
-    w_norm = structural_params_norm[:, 2].unsqueeze(1)
-    g_norm = structural_params_norm[:, 3].unsqueeze(1)
-
-    # 简化的理论关系示例 (需要根据真实物理推导和数据分析)
-    # 假设 f1 主要与 r1 和 w 有关，f2 主要与 r2 和 g 有关
-    # 这些系数 (0.4, 0.6, 0.3, 0.7等) 需要通过对数据或物理模型的分析来确定。
-    # 它们应该将归一化后的结构参数映射到归一化后的频率范围。
-    theoretical_f1_norm = 0.4 * r1_norm + 0.6 * w_norm # + 其他参数的影响
-    theoretical_f2_norm = 0.3 * r2_norm + 0.7 * g_norm # + 其他参数的影响
-
-    # 为了使理论值更贴近实际，可以考虑添加偏置或更复杂的非线性项
-    # 例如：theoretical_f1_norm = 0.4 * r1_norm + 0.6 * w_norm + 0.1 # 添加偏置
-
-    # 计算 MSE 损失
-    loss_f1 = F.mse_loss(f1_pred_norm, theoretical_f1_norm)
-    loss_f2 = F.mse_loss(f2_pred_norm, theoretical_f2_norm)
-    
-    return loss_f1 + loss_f2
-
-
-def structural_param_range_loss(predicted_params_norm: torch.Tensor):
-    """
-    结构参数范围约束损失。
-    惩罚生成器预测的参数超出其归一化范围 [0, 1] (或原始物理范围)。
-    
-    Args:
-        predicted_params_norm (torch.Tensor): 归一化的预测结构参数 (batch_size, 4)。
-    Returns:
-        torch.Tensor: 范围损失。
-    """
-    # 对小于0和大于1的部分进行惩罚
-    # torch.clamp(input, min, max) 将输入张量的值限制在 [min, max] 范围内
-    # 如果值在 [0, 1] 之间，则 (val - 0)^2 和 (val - 1)^2 都为 0 或很小
-    # 如果 val < 0, 则 (val - 0)^2 > 0
-    # 如果 val > 1, 则 (val - 1)^2 > 0
-    
-    # 惩罚超出下限的部分
-    lower_bound_penalty = torch.clamp(0 - predicted_params_norm, min=0)**2
-    # 惩罚超出上限的部分
-    upper_bound_penalty = torch.clamp(predicted_params_norm - 1, min=0)**2
-    
-    # 对所有超出范围的惩罚取平均
-    loss = torch.mean(lower_bound_penalty + upper_bound_penalty)
-    return loss
+# --- 3. BNN KL 损失 (保留，以备将来使用) ---
 
 def bnn_kl_loss(model: nn.Module):
     """
     BNN (Bayesian Neural Network) KL 散度损失。
-    当使用 Monte Carlo Dropout 来近似 BNN 时，通常不需要显式计算 KL 散度损失，
-    因为 Dropout 本身在训练时引入了随机性，而 MC Dropout 在推理时利用了这种随机性来估计不确定性。
-    
-    如果使用像 `torchbnn` 这样的库，或者自己实现了变分推断的 BNN，
-    这里会计算模型权重变分后验与先验之间的 KL 散度，并将其添加到损失中以正则化。
-    
-    对于本项目中采用的 `nn.Dropout` 结合 MC Dropout 的简化方法，此函数返回 0。
-    
-    Args:
-        model (nn.Module): 传入的模型 (通常是 ForwardModel，因为它包含 Dropout)。
-    Returns:
-        torch.Tensor: KL 散度损失 (当前为 0)。
+    对于本项目中采用的 nn.Dropout 结合 MC Dropout 的简化方法，此函数返回 0。
     """
-    # 由于我们使用标准的 nn.Dropout 进行 MC Dropout，没有显式的变分层，
-    # 因此这里返回0。如果未来引入了变分层，需要在此处实现 KL 散度计算。
     return torch.zeros(1, device=next(model.parameters()).device)

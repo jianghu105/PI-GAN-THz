@@ -1,4 +1,4 @@
-# PI_GAN_THZ/core/models/enhanced_discriminator.py
+# PI_GAN_THZ/core/models/discriminator.py
 
 import torch
 import torch.nn as nn

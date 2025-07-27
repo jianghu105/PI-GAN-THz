@@ -1,4 +1,4 @@
-# PI_GAN_THZ/core/train/pretrain_fwd_model_enhanced.py
+# PI_GAN_THZ/core/train/pretrain_fwd_model.py
 
 import sys
 import os
@@ -16,7 +16,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 # 导入 EnhancedForwardPINN 和损失函数
-from core.models.enhanced_forward_model import EnhancedForwardPINN
+from core.models.forward_model import EnhancedForwardPINN
 from core.utils.loss import criterion_mse # 用于光谱和指标的重建损失
 import config.config as cfg # 导入 config
 from core.utils.data_loader import MetamaterialDataset # 导入 MetamaterialDataset
@@ -145,16 +145,16 @@ def pretrain_forward_model(forward_model: EnhancedForwardPINN, dataloader: DataL
 
     # 预训练结束后保存模型
     os.makedirs(cfg.SAVED_MODELS_DIR, exist_ok=True)
-    fwd_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_enhanced_pretrained.pth")
+    fwd_model_path = os.path.join(cfg.SAVED_MODELS_DIR, "forward_model_pretrained.pth")
     torch.save(forward_model.state_dict(), fwd_model_path)
-    print(f"\n预训练的增强版前向模型已保存到 {fwd_model_path}")
+    print(f"\n预训练的前向模型已保存到 {fwd_model_path}")
     print("--- 增强版前向模型预训练完成 ---")
 
     # 保存损失历史，以便后续评估脚本使用
-    loss_history_path = os.path.join(cfg.SAVED_MODELS_DIR, "fwd_enhanced_pretrain_loss_history.pt")
+    loss_history_path = os.path.join(cfg.SAVED_MODELS_DIR, "fwd_pretrain_loss_history.pt")
     # 封装在字典中，以 'train_losses' 为键，兼容评估脚本
     torch.save({'train_losses': epoch_losses}, loss_history_path) 
-    print(f"增强版前向模型预训练损失历史已保存到 {loss_history_path}")
+    print(f"前向模型预训练损失历史已保存到 {loss_history_path}")
 
     return epoch_losses # 返回记录的损失列表
 
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-    print("--- 正在启动增强版前向模型预训练脚本 ---")
+    print("--- 正在启动前向模型预训练脚本 ---")
     print(f"参数: {args}")
 
     # 设置设备

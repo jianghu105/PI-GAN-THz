@@ -50,7 +50,7 @@ DISCRIMINATOR_INPUT_PARAM_DIM = 4                # D的输入参数部分
 
 # 前向模型 (ForwardModel)
 FORWARD_MODEL_INPUT_DIM = 4                         # FwdModel的输入是结构参数
-FORWARD_MODEL_OUTPUT_SPEC_DIM = SPECTRUM_DIM        # FwdModel的输出是光谱
+FORWARD_MODEL_OUTPUT_SPEC_DIM = 250        # FwdModel的输出是光谱
 FORWARD_MODEL_OUTPUT_METRICS_DIM = 8                # FwdModel的输出是物理指标 (f1, f2, Q1, FoM1, S1, Q2, FoM2, S2)
 
 

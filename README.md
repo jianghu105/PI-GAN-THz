@@ -71,7 +71,7 @@ pip install -r requirements.txt
 
 3. **模型评估**
    ```bash
-   python core/evaluate/unified_evaluator.py --num_samples 500
+   python core/evaluate/comprehensive_evaluator.py --num_samples 500
    ```
 
 ### 增强模型训练
@@ -94,7 +94,7 @@ pip install -r requirements.txt
 
 3. **评估增强模型**
    ```bash
-   python core/evaluate/unified_evaluator.py --enhanced
+   python core/evaluate/comprehensive_evaluator.py --enhanced
    ```
 
 ## 模型架构说明
