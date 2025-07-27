@@ -137,5 +137,63 @@ def train_pigan(dataloader, device, generator, discriminator, forward_model, num
     print("--- PI-GAN Training Finished ---")
 
 if __name__ == '__main__':
-    # Setup and run training
-    pass # Simplified for brevity
+    # 设置随机种子
+    set_seed(cfg.RANDOM_SEED)
+    
+    # 准备设备
+    device = torch.device(cfg.DEVICE)
+    print(f"Using device: {device}")
+    
+    # 加载数据集
+    print("Loading dataset...")
+    dataset = MetamaterialDataset(cfg.FULL_DATA_PATH)
+    
+    # 划分训练集和验证集 (这里使用全部数据进行训练)
+    train_loader = DataLoader(
+        dataset, 
+        batch_size=cfg.BATCH_SIZE, 
+        shuffle=True, 
+        num_workers=cfg.NUM_WORKERS
+    )
+    
+    # 初始化模型
+    print("Initializing models...")
+    generator = EnhancedGenerator(
+        spectrum_dim=cfg.SPECTRUM_DIM, 
+        z_dim=cfg.Z_DIM, 
+        output_dim=cfg.GENERATOR_OUTPUT_DIM
+    ).to(device)
+    
+    discriminator = EnhancedDiscriminator(
+        spectrum_dim=cfg.DISCRIMINATOR_INPUT_SPEC_DIM, 
+        param_dim=cfg.DISCRIMINATOR_INPUT_PARAM_DIM
+    ).to(device)
+    
+    # 加载预训练的前向模型
+    print("Loading pretrained forward model...")
+    forward_model = EnhancedForwardPINN(
+        input_param_dim=cfg.FORWARD_MODEL_INPUT_DIM, 
+        spectrum_dim=cfg.FORWARD_MODEL_OUTPUT_SPEC_DIM
+    ).to(device)
+    
+    # 尝试加载预训练权重
+    try:
+        forward_model.load_state_dict(torch.load(
+            os.path.join(cfg.SAVED_MODELS_DIR, 'forward_model_enhanced_pretrained.pth'),
+            map_location=device
+        ))
+        print("Successfully loaded pretrained forward model.")
+    except:
+        print("Warning: Failed to load pretrained forward model. Using random initialization.")
+    
+    # 运行训练
+    print("Starting training...")
+    train_pigan(
+        train_loader, 
+        device, 
+        generator, 
+        discriminator, 
+        forward_model, 
+        num_epochs=cfg.NUM_EPOCHS, 
+        log_interval=cfg.LOG_INTERVAL
+    )

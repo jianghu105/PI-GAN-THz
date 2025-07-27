@@ -9,11 +9,13 @@ from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from scipy.stats import pearsonr
 
 # Add the project root to the Python path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if project_root not in sys.path:
+    sys.path.append(project_root)
 
 from core.models.forward_model import ForwardModel, EnhancedForwardPINN
 from core.utils.data_loader import MetamaterialDataset, denormalize_metrics
-from config.config import Config
+import config.config as cfg
 
 def calculate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
     """
