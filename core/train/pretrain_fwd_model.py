@@ -57,7 +57,6 @@ def pretrain_forward_model(forward_model: EnhancedForwardPINN, dataloader: DataL
     for epoch in range(num_epochs):
         total_loss = 0.0
         total_spectrum_loss = 0.0 # 新增：用于记录光谱损失
-        total_physics_loss = 0.0  # 新增：用于记录物理残差损失
         
         # 自定义进度条实现，更适合Colab环境
         total_batches = len(dataloader)
@@ -74,14 +73,14 @@ def pretrain_forward_model(forward_model: EnhancedForwardPINN, dataloader: DataL
             optimizer.zero_grad()
 
             # 前向传播：预测光谱和物理残差
-            predicted_spectrum, physics_residual = forward_model(real_params_norm)
+            predicted_spectrum = forward_model(real_params_norm)
 
             # 计算损失：光谱重建损失 + 物理残差损失
             loss_spectrum = mse_criterion(predicted_spectrum, real_spectrum)
             loss_physics = torch.mean(physics_residual)  # 物理残差应该尽可能小
 
             # 总损失
-            loss = loss_spectrum + 0.1 * loss_physics  # 物理残差损失权重
+            loss = loss_spectrum
 
             # 反向传播和优化
             loss.backward()
@@ -93,14 +92,12 @@ def pretrain_forward_model(forward_model: EnhancedForwardPINN, dataloader: DataL
             # 累积损失以便计算平均值
             total_loss += loss.item()
             total_spectrum_loss += loss_spectrum.item()
-            total_physics_loss += loss_physics.item()
 
             # 自定义进度条更新：每隔 log_interval 批次更新进度信息
             if (i + 1) % log_interval == 0:
                 # 计算过去 log_interval 批次的平均损失
                 current_avg_loss = total_loss / (i + 1)
                 current_avg_spectrum_loss = total_spectrum_loss / (i + 1)
-                current_avg_physics_loss = total_physics_loss / (i + 1)
                 
                 # 计算进度百分比和进度条
                 progress = (i + 1) / total_batches
@@ -116,20 +113,16 @@ def pretrain_forward_model(forward_model: EnhancedForwardPINN, dataloader: DataL
                     eta_str = "ETA: --"
                 
                 # 清除上一行并打印新的进度条
-                print(f"\rProgress: [{bar}] {i+1}/{total_batches} | "
-                      f"Loss:{current_avg_loss:.4f} Spec:{current_avg_spectrum_loss:.4f} "
-                      f"Physics:{current_avg_physics_loss:.4f} | {eta_str}", end='', flush=True)
+                print(f"Progress: [{bar}] {i+1}/{total_batches} | "                      f"Loss:{current_avg_loss:.4f} Spec:{current_avg_spectrum_loss:.4f} | ", end='', flush=True)
         
         # 每个 epoch 结束时的最终平均损失
         avg_epoch_loss = total_loss / len(dataloader)
         avg_epoch_spectrum_loss = total_spectrum_loss / len(dataloader)
-        avg_epoch_physics_loss = total_physics_loss / len(dataloader)
         epoch_losses.append(avg_epoch_loss) # 记录每个 epoch 的总平均损失
 
         # 完成当前epoch后，打印最终进度条
         print(f"\rProgress: [{'█'*50}] {total_batches}/{total_batches} | "
-              f"Loss:{avg_epoch_loss:.4f} Spec:{avg_epoch_spectrum_loss:.4f} "
-              f"Physics:{avg_epoch_physics_loss:.4f} | "
+              f"Loss:{avg_epoch_loss:.4f} Spec:{avg_epoch_spectrum_loss:.4f} | "
               f"Completed in {time.time() - start_time:.0f}s")
         
         # 更新学习率调度器
@@ -140,7 +133,6 @@ def pretrain_forward_model(forward_model: EnhancedForwardPINN, dataloader: DataL
         print(f"Epoch [{epoch+1}/{num_epochs}] Summary - "
               f"总平均损失: {avg_epoch_loss:.4f}, "
               f"光谱损失: {avg_epoch_spectrum_loss:.4f}, "
-              f"物理残差损失: {avg_epoch_physics_loss:.4f}, "
               f"学习率: {current_lr:.2e}")
 
     # 预训练结束后保存模型
