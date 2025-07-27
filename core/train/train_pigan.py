@@ -14,7 +14,7 @@ if project_root not in sys.path:
 # 导入所有模型
 from core.models.generator import EnhancedGenerator
 from core.models.discriminator import EnhancedDiscriminator
-from core.models.forward_model import PhysicsEnhancedForward
+from core.models.forward_model import EnhancedForwardPINN
 
 # 导入所有需要的工具函数和损失函数
 from core.utils.data_loader import MetamaterialDataset

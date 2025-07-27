@@ -35,7 +35,7 @@ class EnhancedForwardPINN(nn.Module):
     """
     
     def __init__(self, input_param_dim: int = 4, spectrum_dim: int = 250, fourier_dim: int = 32):
-        super(PhysicsEnhancedForward, self).__init__()
+        super(EnhancedForwardPINN, self).__init__()
         self.input_param_dim = input_param_dim
         self.spectrum_dim = spectrum_dim
         self.fourier_dim = fourier_dim
