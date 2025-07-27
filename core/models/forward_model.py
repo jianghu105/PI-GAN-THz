@@ -27,7 +27,7 @@ class ResidualBlock(nn.Module):
     def forward(self, x):
         return x + self.scale_factor * self.layer(x)
 
-class PhysicsEnhancedForward(nn.Module):
+class EnhancedForwardPINN(nn.Module):
     """
     物理增强的前向模型：
     输入：4维结构参数(r1,r2,w,g) (单位: 米)
