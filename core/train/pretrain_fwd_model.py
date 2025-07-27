@@ -1,5 +1,3 @@
-# PI_GAN_THZ/core/train/pretrain_fwd_model.py
-
 import sys
 import os
 import torch
@@ -53,7 +51,7 @@ def pretrain_forward_model(forward_model: EnhancedForwardPINN, dataloader: DataL
     # 设置模型为训练模式 (重要，因为 ForwardModel 包含 Dropout)
     forward_model.train()
 
-    # 预训练循环
+    # 训练循环
     for epoch in range(num_epochs):
         total_loss = 0.0
         total_spectrum_loss = 0.0 # 新增：用于记录光谱损失
@@ -72,13 +70,12 @@ def pretrain_forward_model(forward_model: EnhancedForwardPINN, dataloader: DataL
             # 清零梯度
             optimizer.zero_grad()
 
-            # 前向传播：预测光谱和物理残差
+            # 前向传播：预测光谱
             predicted_spectrum = forward_model(real_params_norm)
 
-            # 计算损失：光谱重建损失 + 物理残差损失
+            # 计算损失：光谱重建损失
             loss_spectrum = mse_criterion(predicted_spectrum, real_spectrum)
-            loss_physics = torch.mean(physics_residual)  # 物理残差应该尽可能小
-
+            
             # 总损失
             loss = loss_spectrum
 
@@ -113,7 +110,7 @@ def pretrain_forward_model(forward_model: EnhancedForwardPINN, dataloader: DataL
                     eta_str = "ETA: --"
                 
                 # 清除上一行并打印新的进度条
-                print(f"Progress: [{bar}] {i+1}/{total_batches} | "                      f"Loss:{current_avg_loss:.4f} Spec:{current_avg_spectrum_loss:.4f} | ", end='', flush=True)
+                print(f"Progress: [{bar}] {i+1}/{total_batches} | "                      f"Loss:{current_avg_loss:.4f} Spec:{current_avg_spectrum_loss:.4f} | {eta_str}", end='', flush=True)
         
         # 每个 epoch 结束时的最终平均损失
         avg_epoch_loss = total_loss / len(dataloader)
