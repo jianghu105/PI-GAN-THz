@@ -30,7 +30,9 @@ class MetamaterialDataset(Dataset):
 def get_dataloaders(batch_size=config.BATCH_SIZE):
     """Loads data, preprocesses it, and returns PyTorch DataLoaders."""
     # Load the dataset
-    df = pd.read_csv(config.DATASET_PATH)
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+    dataset_full_path = os.path.join(project_root, config.DATASET_PATH)
+    df = pd.read_csv(dataset_full_path)
 
     # Separate features
     struct_params = df[config.STRUCT_PARAMS].values
