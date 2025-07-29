@@ -1,79 +1,43 @@
 
-
 import torch
 import torch.nn as nn
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+from config import config
 
 class Generator(nn.Module):
-    """
-    The Generator model for the PI-GAN.
-
-    Takes a target transmission spectrum and a random noise vector as input
-    and generates the corresponding structural parameters (r1, r2, w, g).
-    """
-    def __init__(self, spectra_dim=250, params_dim=4, noise_dim=100, hidden_dim=256):
-        """
-        Initializes the Generator model.
-
-        Args:
-            spectra_dim (int): The dimensionality of the input spectrum (e.g., 250 frequency points).
-            params_dim (int): The dimensionality of the output structural parameters (e.g., 4 for r1, r2, w, g).
-            noise_dim (int): The dimensionality of the random noise vector.
-            hidden_dim (int): The size of the hidden layers.
-        """
-        super(Generator, self).__init__()
-        self.input_dim = spectra_dim + noise_dim
-        self.params_dim = params_dim
-
-        self.model = nn.Sequential(
-            nn.Linear(self.input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim * 2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim * 2, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, self.params_dim),
-            nn.Sigmoid()  # To ensure output is in [0, 1] as parameters are normalized
+    """Generates structural parameters from a latent vector."""
+    def __init__(self, latent_dim, output_dim):
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Linear(latent_dim, 256),
+            nn.BatchNorm1d(256),
+            nn.LeakyReLU(0.2),
+            nn.Linear(256, 512),
+            nn.BatchNorm1d(512),
+            nn.LeakyReLU(0.2),
+            nn.Linear(512, 1024),
+            nn.BatchNorm1d(1024),
+            nn.LeakyReLU(0.2),
+            nn.Linear(1024, output_dim),
+            nn.Sigmoid()  # To ensure outputs are in [0, 1] range, matching the scaled data
         )
 
-    def forward(self, spectrum, noise):
-        """
-        Forward pass of the Generator.
-
-        Args:
-            spectrum (torch.Tensor): The target transmission spectrum tensor. Shape: (batch_size, spectra_dim).
-            noise (torch.Tensor): The random noise tensor. Shape: (batch_size, noise_dim).
-
-        Returns:
-            torch.Tensor: The generated structural parameters. Shape: (batch_size, params_dim).
-        """
-        # Concatenate spectrum and noise along the feature dimension
-        combined_input = torch.cat([spectrum, noise], dim=1)
-        generated_params = self.model(combined_input)
-        return generated_params
+    def forward(self, z):
+        output = self.network(z)
+        assert not torch.isnan(output).any(), "Generator output contains NaN values!"
+        return output
 
 if __name__ == '__main__':
-    # Example usage and model summary
-    batch_size = 32
-    spectra_dim = 250
-    params_dim = 4
-    noise_dim = 100
-
-    # Create a generator instance
-    generator = Generator(spectra_dim=spectra_dim, params_dim=params_dim, noise_dim=noise_dim)
-    print("--- Generator Architecture ---")
-    print(generator)
-
-    # Create dummy input tensors
-    dummy_spectrum = torch.randn(batch_size, spectra_dim)
-    dummy_noise = torch.randn(batch_size, noise_dim)
-
-    # Get the output
-    output_params = generator(dummy_spectrum, dummy_noise)
-
-    print("\n--- Input/Output Shapes ---")
-    print(f"Input spectrum shape: {dummy_spectrum.shape}")
-    print(f"Input noise shape:    {dummy_noise.shape}")
-    print(f"Output params shape:  {output_params.shape}")
-    assert output_params.shape == (batch_size, params_dim)
-    print("\nSuccessfully tested the Generator model.")
-
+    # Example usage
+    generator = Generator(latent_dim=config.LATENT_DIM, output_dim=len(config.STRUCT_PARAMS)).to(config.DEVICE)
+    
+    # Create a dummy latent vector
+    dummy_z = torch.randn(config.BATCH_SIZE, config.LATENT_DIM).to(config.DEVICE)
+    
+    generated_params = generator(dummy_z)
+    
+    print("Generator Test")
+    print(f"Input latent vector shape: {dummy_z.shape}")
+    print(f"Generated parameters shape: {generated_params.shape}")
