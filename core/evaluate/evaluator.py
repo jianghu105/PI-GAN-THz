@@ -35,7 +35,7 @@ def evaluate_model(num_samples=1000):
         generator_checkpoints.sort(key=lambda x: int(x.split('_')[2].split('.')[0]), reverse=True)
         generator_path = os.path.join(config.SAVED_MODELS_DIR, generator_checkpoints[0])
         print(f"Using latest generator checkpoint: {generator_path}")
-    generator.load_state_dict(torch.load(generator_path))
+    generator.load_state_dict(torch.load(generator_path, map_location=torch.device('cpu')))
     generator.eval()
 
     # Load pre-trained Forward Model (for predicting spectra/metrics of generated structures)
@@ -47,7 +47,7 @@ def evaluate_model(num_samples=1000):
     if not os.path.exists(forward_model_path):
         print(f"Error: Forward model not found at {forward_model_path}. Please pre-train the forward model first.")
         return
-    forward_model.load_state_dict(torch.load(forward_model_path))
+    forward_model.load_state_dict(torch.load(forward_model_path, map_location=torch.device('cpu')))
     forward_model.eval()
 
     # Generate samples
@@ -86,11 +86,9 @@ def evaluate_model(num_samples=1000):
     print(df_generated_metrics.describe())
 
     # Optional: Save generated data to CSV for further analysis
-    import tempfile
-
-    output_dir = tempfile.mkdtemp(prefix="generated_data_")
-    print(f"Generated data will be saved to temporary directory: {output_dir}/")
-    # os.makedirs(output_dir, exist_ok=True) # mkdtemp already creates the directory
+    output_dir = config.GENERATED_DATA_DIR
+    os.makedirs(output_dir, exist_ok=True)
+    print(f"Generated data will be saved to: {output_dir}/")
     df_generated_structs.to_csv(os.path.join(output_dir, "generated_structs.csv"), index=False)
     df_generated_spectra.to_csv(os.path.join(output_dir, "generated_spectra.csv"), index=False)
     df_generated_metrics.to_csv(os.path.join(output_dir, "generated_metrics.csv"), index=False)

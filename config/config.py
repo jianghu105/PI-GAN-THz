@@ -7,6 +7,7 @@ DATASET_PATH = "dataset/THz_Metamaterial_Spectra_With_Metrics.csv"
 CHECKPOINT_DIR = "checkpoints"
 SAVED_MODELS_DIR = "saved_models"
 LOG_DIR = "logs"
+GENERATED_DATA_DIR = "generated_data"
 
 # --- Data Preprocessing ---
 STRUCT_PARAMS = ['r1', 'r2', 'w', 'g']
