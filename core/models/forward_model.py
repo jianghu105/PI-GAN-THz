@@ -12,9 +12,11 @@ class TrainableSpectralFeatureExtractor(nn.Module):
     """A trainable module to extract physical metrics from a spectrum."""
     def __init__(self, spectra_dim, metric_dim):
         super().__init__()
-        # This network learns to extract metrics from the spectra
+        # Increased capacity for the feature extractor
         self.network = nn.Sequential(
-            nn.Linear(spectra_dim, 256),
+            nn.Linear(spectra_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.ReLU(),
@@ -26,19 +28,21 @@ class TrainableSpectralFeatureExtractor(nn.Module):
         return self.network(spectra_batch)
 
 class ForwardModel(nn.Module):
-    """Predicts the transmission spectrum from structural parameters using 1D CNN
+    """Predicts the transmission spectrum from structural parameters using MLP
     and extracts metrics using a trainable feature extractor."""
     def __init__(self, input_dim, output_dim):
         super().__init__()
-        # Main network (1D CNN for spectra prediction)
-        # Input: (batch_size, 1, input_dim) after unsqueeze
+        # Main network (MLP for spectra prediction) - Reverted from 1D CNN and increased capacity
         self.spectra_network = nn.Sequential(
-            nn.Conv1d(in_channels=1, out_channels=64, kernel_size=3, padding=1),
+            nn.Linear(input_dim, 256),
             nn.ReLU(),
-            nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, padding=1),
+            nn.Linear(256, 512),
             nn.ReLU(),
-            nn.Flatten(), # Flatten the output of CNN before passing to Linear
-            nn.Linear(128 * input_dim, output_dim), # input_dim is the sequence length here
+            nn.Linear(512, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 512),
+            nn.ReLU(),
+            nn.Linear(512, output_dim),
             nn.Sigmoid() # Assuming spectra are normalized between 0 and 1
         )
         
@@ -49,13 +53,11 @@ class ForwardModel(nn.Module):
         ).to(config.DEVICE) # Ensure feature extractor is on the correct device
 
     def forward(self, struct_params):
-        # Reshape struct_params for 1D CNN: (batch_size, input_dim) -> (batch_size, 1, input_dim)
-        x = struct_params.unsqueeze(1);
-        predicted_spectra = self.spectra_network(x);
+        predicted_spectra = self.spectra_network(struct_params)
         
         # Pass predicted_spectra to the trainable feature extractor
         # Gradients will now flow through the feature extractor
-        predicted_metrics = self.feature_extractor(predicted_spectra);
+        predicted_metrics = self.feature_extractor(predicted_spectra)
             
         return predicted_spectra, predicted_metrics
 
@@ -85,7 +87,7 @@ if __name__ == '__main__':
     
     predicted_spectra, predicted_metrics = model(dummy_input)
     
-    print("Forward Model Test (1D CNN + Trainable Feature Extractor)")
+    print("Forward Model Test (MLP + Trainable Feature Extractor)")
     print(f"Input shape:      {dummy_input.shape}")
     print(f"Predicted spectra shape: {predicted_spectra.shape}")
     print(f"Predicted metrics shape: {predicted_metrics.shape}")
