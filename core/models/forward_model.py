@@ -72,6 +72,25 @@ class DifferentiableSpectralFeatureExtractor(nn.Module):
         metrics = torch.cat([f1, f2, q1, fom1, s1, q2, fom2, s2], dim=1)
         return metrics
 
+class MetricsCalibrator(nn.Module):
+    """Lightweight calibration head to align physics-inspired features with dataset-defined metrics.
+
+    Input concatenates physics-based metrics (8 dims) with simple spectral summary stats (mean/min/max/std),
+    forming a 12-dimensional vector per sample.
+    """
+    def __init__(self, input_dim: int = 12, output_dim: int = 8):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, output_dim)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
 class ForwardModel(nn.Module):
     """Predicts the transmission spectrum from structural parameters using MLP
     and extracts metrics using a differentiable physics-inspired feature extractor."""
@@ -95,13 +114,28 @@ class ForwardModel(nn.Module):
             spectra_dim=output_dim,
             metric_dim=len(config.METRIC_PARAMS)
         ).to(config.DEVICE)
+        # Calibration head to increase expressivity and match dataset metric definitions
+        self.calibrator = MetricsCalibrator(input_dim=12, output_dim=len(config.METRIC_PARAMS)).to(config.DEVICE)
 
     def forward(self, struct_params):
         spectra_logits = self.spectra_network(struct_params)
-        # Smoothly map to [0,1] using tanh-affine to provide gentler saturation than sigmoid
-        predicted_spectra = 0.5 * (torch.tanh(spectra_logits) + 1.0)
+        # Activation choice via config for stability control
+        if getattr(config, 'SPECTRA_ACTIVATION', 'sigmoid') == 'tanh':
+            predicted_spectra = 0.5 * (torch.tanh(spectra_logits) + 1.0)
+        else:
+            predicted_spectra = torch.sigmoid(spectra_logits)
 
-        predicted_metrics = self.feature_extractor(predicted_spectra)
+        # Physics-inspired baseline metrics
+        physics_metrics = self.feature_extractor(predicted_spectra)
+        # Simple spectral statistics as auxiliary cues
+        spec_mean = torch.mean(predicted_spectra, dim=1, keepdim=True)
+        spec_min, _ = torch.min(predicted_spectra, dim=1, keepdim=True)
+        spec_max, _ = torch.max(predicted_spectra, dim=1, keepdim=True)
+        spec_std = torch.std(predicted_spectra, dim=1, keepdim=True)
+        summary_stats = torch.cat([spec_mean, spec_min, spec_max, spec_std], dim=1)
+        # Calibrated metrics
+        calib_input = torch.cat([physics_metrics, summary_stats], dim=1)
+        predicted_metrics = self.calibrator(calib_input)
         return predicted_spectra, predicted_metrics
 
 if __name__ == '__main__':

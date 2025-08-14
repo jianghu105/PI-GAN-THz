@@ -9,6 +9,11 @@ SAVED_MODELS_DIR = "saved_models"
 LOG_DIR = "logs"
 GENERATED_DATA_DIR = "generated_data"
 PLOT_DIR="plots"
+# --- Forward Model Options ---
+# Choose spectra activation: 'sigmoid' or 'tanh'
+SPECTRA_ACTIVATION = 'sigmoid'
+# Choose metric extractor: 'trainable' or 'physics'
+METRIC_EXTRACTOR_TYPE = 'trainable'
 
 # --- Data Preprocessing ---
 STRUCT_PARAMS = ['r1', 'r2', 'w', 'g']

@@ -40,6 +40,8 @@ class Discriminator(nn.Module):
         super().__init__()
 
         self.struct_dim = struct_dim
+        self.spectra_dim = spectra_dim
+        self.metric_dim = metric_dim
 
         # Structure branch (MLP)
         self.struct_encoder = nn.Sequential(
@@ -92,10 +94,12 @@ class Discriminator(nn.Module):
         self.physical_constraint_module = PhysicalConstraintModule()
 
     def forward(self, combined_input):
-        # Split combined input
-        struct = combined_input[:, :self.struct_dim]
-        spectra = combined_input[:, self.struct_dim:-8]  # assume last 8 are metrics
-        metrics = combined_input[:, -8:]
+        # Split combined input dynamically
+        struct_end = self.struct_dim
+        spectra_end = self.struct_dim + self.spectra_dim
+        struct = combined_input[:, :struct_end]
+        spectra = combined_input[:, struct_end:spectra_end]
+        metrics = combined_input[:, spectra_end:]
 
         # Encoders
         struct_feat = self.struct_encoder(struct)
