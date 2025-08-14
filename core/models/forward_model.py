@@ -99,14 +99,19 @@ class ForwardModel(nn.Module):
         # Main network (MLP for spectra prediction)
         self.spectra_network = nn.Sequential(
             nn.Linear(input_dim, 256),
+            nn.BatchNorm1d(256),
             nn.LeakyReLU(),
             nn.Linear(256, 512),
+            nn.BatchNorm1d(512),
             nn.LeakyReLU(),
             nn.Linear(512, 1024),
+            nn.BatchNorm1d(1024),
             nn.LeakyReLU(),
             nn.Linear(1024, 1024),
+            nn.BatchNorm1d(1024),
             nn.LeakyReLU(),
             nn.Linear(1024, 512),
+            nn.BatchNorm1d(512),
             nn.LeakyReLU(),
             nn.Linear(512, output_dim)
         )
