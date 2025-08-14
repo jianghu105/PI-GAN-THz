@@ -5,6 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import sys
+import argparse
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
@@ -13,7 +14,7 @@ from core.models.generator import Generator
 from core.models.forward_model import ForwardModel
 from core.utils.data_loader import get_dataloaders
 
-def evaluate_model(num_samples=1000):
+def evaluate_model(num_samples=1000, condition_source="real", target_metrics_csv=None):
     print("Starting model evaluation...")
     print(f"Configured GENERATED_DATA_DIR: {config.GENERATED_DATA_DIR}")
     
@@ -74,11 +75,38 @@ def evaluate_model(num_samples=1000):
             print("Please ensure num_samples is sufficient or BATCH_SIZE is adjusted.")
             return # Exit if no samples will be generated
 
+        # Prepare conditional vectors
+        if condition_source == "real":
+            # Sample conditions from REAL metrics distribution (normalized via train-fitted scaler)
+            print("Condition source: real dataset metrics distribution")
+            df_all = pd.read_csv(config.DATASET_PATH)
+            metrics_pool_raw = df_all[config.METRIC_PARAMS].values
+            metrics_pool_normalized = scalers['metrics'].transform(metrics_pool_raw)
+        elif condition_source == "csv":
+            if target_metrics_csv is None or not os.path.exists(target_metrics_csv):
+                print(f"Error: target_metrics_csv not provided or not found: {target_metrics_csv}")
+                return
+            print(f"Condition source: user CSV at {target_metrics_csv}")
+            df_user = pd.read_csv(target_metrics_csv)
+            # Expect columns to include config.METRIC_PARAMS; allow extra columns
+            missing = [c for c in config.METRIC_PARAMS if c not in df_user.columns]
+            if missing:
+                print(f"Error: CSV missing required metric columns: {missing}")
+                return
+            metrics_pool_raw = df_user[config.METRIC_PARAMS].values
+            metrics_pool_normalized = scalers['metrics'].transform(metrics_pool_raw)
+        else:
+            print(f"Error: Unknown condition_source '{condition_source}'. Use 'real' or 'csv'.")
+            return
+
         with torch.no_grad():
             for i in range(num_batches):
                 z = torch.randn(config.BATCH_SIZE, config.LATENT_DIM).to(config.DEVICE)
-                condition_for_G = torch.randn(config.BATCH_SIZE, config.CONDITION_DIM).to(config.DEVICE)
-                
+                # Draw a random minibatch of normalized metrics as condition
+                idx = np.random.choice(metrics_pool_normalized.shape[0], size=config.BATCH_SIZE, replace=True)
+                condition_for_G_np = metrics_pool_normalized[idx]
+                condition_for_G = torch.from_numpy(condition_for_G_np).float().to(config.DEVICE)
+
                 fake_struct_normalized = generator(z, condition_for_G)
                 fake_spectra_normalized, fake_metrics_normalized = forward_model(fake_struct_normalized)
 
@@ -108,6 +136,28 @@ def evaluate_model(num_samples=1000):
 
         print("\n--- Generated Metrics Summary ---")
         print(df_generated_metrics.describe())
+
+        # Conditional consistency: how close generated metrics are to conditions used
+        if condition_source == "real":
+            # Reconstruct the normalized conditions used for each batch to compare
+            # For simplicity, estimate consistency by passing generated spectra through forward model metrics (already done)
+            # and comparing distribution with real dataset metrics
+            df_real_metrics = pd.DataFrame(pd.read_csv(config.DATASET_PATH)[config.METRIC_PARAMS], columns=config.METRIC_PARAMS)
+            print("\n--- Conditional Consistency (Generated vs Real Metrics) ---")
+            consistency_mae = (df_generated_metrics - df_real_metrics.sample(n=len(df_generated_metrics), replace=True).reset_index(drop=True)).abs().mean()
+            print(consistency_mae)
+        elif condition_source == "csv" and target_metrics_csv is not None:
+            df_target = pd.read_csv(target_metrics_csv)
+            # Align columns
+            df_target = df_target[config.METRIC_PARAMS]
+            # Broadcast/trim to match lengths
+            if len(df_target) < len(df_generated_metrics):
+                df_target = pd.concat([df_target] * (int(np.ceil(len(df_generated_metrics)/len(df_target)))), ignore_index=True)[:len(df_generated_metrics)]
+            elif len(df_target) > len(df_generated_metrics):
+                df_target = df_target.iloc[:len(df_generated_metrics)].reset_index(drop=True)
+            print("\n--- Conditional Consistency (Generated vs Target CSV Metrics) ---")
+            consistency_mae = (df_generated_metrics - df_target).abs().mean()
+            print(consistency_mae)
 
         # Save generated data to CSV
         print(f"Saving generated data to: {output_dir}/")
@@ -205,4 +255,10 @@ def evaluate_model(num_samples=1000):
         traceback.print_exc()
 
 if __name__ == '__main__':
-    evaluate_model()
+    parser = argparse.ArgumentParser(description="Evaluate PI-GAN generator and forward model")
+    parser.add_argument('--num-samples', type=int, default=1000, help='Number of samples to generate')
+    parser.add_argument('--condition', type=str, default='real', choices=['real', 'csv'], help='Condition source: real dataset metrics or a CSV file')
+    parser.add_argument('--target-metrics-csv', type=str, default=None, help='Path to CSV containing target metrics columns')
+    args = parser.parse_args()
+
+    evaluate_model(num_samples=args.num_samples, condition_source=args.condition, target_metrics_csv=args.target_metrics_csv)

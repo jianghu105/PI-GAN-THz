@@ -28,6 +28,11 @@ RANDOM_STATE = 42
 STRUCT_MIN_BOUNDS = [0.0, 0.0, 0.0, 0.0] 
 STRUCT_MAX_BOUNDS = [1.0, 1.0, 1.0, 1.0] 
 
+# Relationship constraints among structural parameters (applied in Generator projector)
+# If your domain requires r1 >= r2 (outer radius >= inner radius), keep True.
+# Otherwise set to False.
+ENFORCE_R1_GE_R2 = True
+
 # --- Training Hyperparameters ---
 # General
 EPOCHS = 500
@@ -50,6 +55,13 @@ CONDITION_DIM = len(METRIC_PARAMS) # Assuming conditioning on all metrics
 
 # Loss weights
 LAMBDA_GP = 10  # Gradient Penalty
-LAMBDA_PHYSICS = 0.1 # Physics-informed loss (Reduced from 0.5)
-LAMBDA_METRIC = 0.05 # Metric loss (Reduced from 0.2)
-LAMBDA_PID_FEEDBACK = 0.0 # PID Feedback Loss Weight (Set to 0 for initial testing)
+LAMBDA_R1 = 0.0  # R1 regularization weight (gamma/2). Set >0 to enable.
+LAMBDA_PHYSICS = 0.1 # Physics-informed loss
+LAMBDA_METRIC = 0.05 # Metric loss
+LAMBDA_PID_FEEDBACK = 0.01 # Enable small weight for physical feedback initially
+PID_FEEDBACK_ANNEAL_EPOCHS = 200 # Linearly anneal PID weight from initial to target over these GAN epochs
+PID_FEEDBACK_TARGET = 0.05 # Target PID weight at the end of annealing
+
+# Diversity enhancement (Mode-Seeking)
+LAMBDA_MODE_SEEKING = 0.1  # Weight for mode-seeking loss encouraging diverse outputs per condition
+MODE_SEEKING_EPS = 1e-6    # Small epsilon to avoid division by zero

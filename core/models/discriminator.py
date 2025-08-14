@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.nn.utils import spectral_norm
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
@@ -33,76 +34,83 @@ class PhysicalConstraintModule(nn.Module):
         return penalty # Returns a tensor of shape (batch_size,)
 
 class Discriminator(nn.Module):
-    """Discriminates between real and fake (structure, spectra, metric) tuples,
-    and provides physical error feedback."""
+    """Multi-branch discriminator that processes structure, spectra, and metrics with dedicated encoders,
+    then fuses them for real/fake scoring and physical error feedback."""
     def __init__(self, struct_dim, spectra_dim, metric_dim):
         super().__init__()
-        
-        self.struct_dim = struct_dim # Used to extract structural parameters from combined input
-        total_input_dim = struct_dim + spectra_dim + metric_dim
-        
-        # 1D CNN Backbone
-        # Input shape for Conv1d: (batch_size, in_channels, sequence_length)
-        # Here, in_channels=1, sequence_length=total_input_dim
-        self.cnn_backbone = nn.Sequential(
-            nn.Conv1d(in_channels=1, out_channels=64, kernel_size=3, padding=1),
-            nn.BatchNorm1d(64),
-            nn.LeakyReLU(0.2),
-            nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, padding=1),
-            nn.BatchNorm1d(128),
-            nn.LeakyReLU(0.2),
-            nn.Conv1d(in_channels=128, out_channels=256, kernel_size=3, padding=1),
-            nn.BatchNorm1d(256),
-            nn.LeakyReLU(0.2),
-            nn.Flatten() # Flatten the output of CNN before passing to Linear layers
-        )
-        
-        # Calculate the output dimension of the CNN backbone after flattening
-        # Assuming padding=1, kernel_size=3, stride=1, the sequence length remains total_input_dim
-        cnn_output_dim = 256 * total_input_dim 
 
-        # Head 1: Real/Fake Score (Traditional GAN output)
+        self.struct_dim = struct_dim
+
+        # Structure branch (MLP)
+        self.struct_encoder = nn.Sequential(
+            spectral_norm(nn.Linear(struct_dim, 64)),
+            nn.LeakyReLU(0.2),
+            spectral_norm(nn.Linear(64, 128)),
+            nn.LeakyReLU(0.2),
+        )
+
+        # Spectra branch (1D CNN)
+        self.spectra_encoder = nn.Sequential(
+            spectral_norm(nn.Conv1d(1, 64, kernel_size=5, padding=2)),
+            nn.LeakyReLU(0.2),
+            spectral_norm(nn.Conv1d(64, 128, kernel_size=5, padding=2)),
+            nn.LeakyReLU(0.2),
+            spectral_norm(nn.Conv1d(128, 256, kernel_size=3, padding=1)),
+            nn.LeakyReLU(0.2),
+            nn.AdaptiveAvgPool1d(16),
+            nn.Flatten(),
+        )
+
+        # Metric branch (MLP)
+        self.metric_encoder = nn.Sequential(
+            spectral_norm(nn.Linear(metric_dim, 64)),
+            nn.LeakyReLU(0.2),
+            spectral_norm(nn.Linear(64, 128)),
+            nn.LeakyReLU(0.2),
+        )
+
+        # Calculate fusion dim (spectra branch outputs 256*16)
+        fusion_dim = 128 + (256 * 16) + 128
+
+        # Fusion + heads
+        self.fusion = nn.Sequential(
+            spectral_norm(nn.Linear(fusion_dim, 256)),
+            nn.LeakyReLU(0.2),
+        )
         self.real_fake_head = nn.Sequential(
-            nn.Linear(cnn_output_dim, 128),
+            spectral_norm(nn.Linear(256, 128)),
             nn.LeakyReLU(0.2),
-            nn.Linear(128, 1) # No sigmoid, for WGAN-GP
+            spectral_norm(nn.Linear(128, 1))
+        )
+        self.learned_physical_error_head = nn.Sequential(
+            spectral_norm(nn.Linear(256, 64)),
+            nn.LeakyReLU(0.2),
+            spectral_norm(nn.Linear(64, 1))
         )
 
-        # Head 2: Learned Physical Error Feedback
-        self.learned_physical_error_head = nn.Sequential(
-            nn.Linear(cnn_output_dim, 64),
-            nn.LeakyReLU(0.2),
-            nn.Linear(64, 1) # Outputs a scalar physical error score
-        )
-        
         # Physical Constraint Module (Non-trainable)
         self.physical_constraint_module = PhysicalConstraintModule()
 
     def forward(self, combined_input):
-        # combined_input shape: (batch_size, total_input_dim)
-        # Reshape for 1D CNN: (batch_size, 1, total_input_dim)
-        x = combined_input.unsqueeze(1)
-        
-        # Extract features through the 1D CNN backbone
-        cnn_features = self.cnn_backbone(x)
-        
-        # Calculate the real/fake score
-        real_fake_score = self.real_fake_head(cnn_features)
+        # Split combined input
+        struct = combined_input[:, :self.struct_dim]
+        spectra = combined_input[:, self.struct_dim:-8]  # assume last 8 are metrics
+        metrics = combined_input[:, -8:]
 
-        # Calculate the learned physical error
-        # Squeeze to get shape (batch_size,) from (batch_size, 1)
-        learned_physical_error = self.learned_physical_error_head(cnn_features).squeeze(1)
+        # Encoders
+        struct_feat = self.struct_encoder(struct)
+        spectra_feat = self.spectra_encoder(spectra.unsqueeze(1))
+        metric_feat = self.metric_encoder(metrics)
 
-        # Extract structural parameters from the combined_input for rule-based physical constraint check
-        # Assuming struct_dim is the first part of the combined input
-        struct_params = combined_input[:, :self.struct_dim]
-        rule_based_penalty = self.physical_constraint_module(struct_params)
-        
-        # Combine learned physical error and rule-based penalty
-        # This is a design choice; simple addition is used here.
+        fused = torch.cat([struct_feat, spectra_feat, metric_feat], dim=1)
+        fused = self.fusion(fused)
+
+        real_fake_score = self.real_fake_head(fused)
+        learned_physical_error = self.learned_physical_error_head(fused).squeeze(1)
+
+        # Rule-based penalty
+        rule_based_penalty = self.physical_constraint_module(struct)
         physical_error_feedback = learned_physical_error + rule_based_penalty
-        
-        # Return both the real/fake score and the physical error feedback
         return real_fake_score, physical_error_feedback
 
 if __name__ == '__main__':

@@ -5,6 +5,38 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from config import config
 
+class StructuralParamProjector(nn.Module):
+    """Projects normalized structural parameters to respect bounds and relations.
+
+    Operates in the normalized space expected by the rest of the pipeline.
+    - Clamps/affine maps to [STRUCT_MIN_BOUNDS, STRUCT_MAX_BOUNDS]
+    - Optionally enforces r1 >= r2 by sorting the first two parameters
+    """
+    def __init__(self):
+        super().__init__()
+        self.register_buffer('min_bounds', torch.tensor(config.STRUCT_MIN_BOUNDS, dtype=torch.float32))
+        self.register_buffer('max_bounds', torch.tensor(config.STRUCT_MAX_BOUNDS, dtype=torch.float32))
+        # relation flags from config (with safe defaults)
+        self.enforce_r1_ge_r2 = getattr(config, 'ENFORCE_R1_GE_R2', True)
+
+    def forward(self, normalized_params: torch.Tensor) -> torch.Tensor:
+        # Ensure on same device
+        min_b = self.min_bounds.to(normalized_params.device)
+        max_b = self.max_bounds.to(normalized_params.device)
+
+        # Affine map within provided bounds (supports bounds != [0,1])
+        projected = min_b + (max_b - min_b) * normalized_params
+
+        # Enforce relationship constraints in normalized space
+        if self.enforce_r1_ge_r2:
+            r_pair = projected[:, 0:2]
+            r_sorted, _ = torch.sort(r_pair, dim=1, descending=True)  # r1 >= r2
+            projected = torch.cat([r_sorted, projected[:, 2:]], dim=1)
+
+        # Final clamp to bounds
+        projected = torch.max(torch.min(projected, max_b), min_b)
+        return projected
+
 class Generator(nn.Module):
     """Generates structural parameters from a latent vector and a condition vector."""
     def __init__(self, latent_dim, output_dim, condition_dim):
@@ -34,12 +66,16 @@ class Generator(nn.Module):
             nn.Sigmoid()  # To ensure outputs are in [0, 1] range, matching the scaled data
         )
 
+        # Projector to enforce bounds/relations in normalized space
+        self.projector = StructuralParamProjector()
+
     def forward(self, z, condition):
         # Concatenate latent vector and condition vector
         combined_input = torch.cat([z, condition], dim=1)
-        output = self.network(combined_input)
-        assert not torch.isnan(output).any(), "Generator output contains NaN values!"
-        return output
+        normalized_output = self.network(combined_input)
+        projected_output = self.projector(normalized_output)
+        assert not torch.isnan(projected_output).any(), "Generator output contains NaN values!"
+        return projected_output
 
 if __name__ == '__main__':
     # Example usage

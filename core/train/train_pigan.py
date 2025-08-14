@@ -12,7 +12,7 @@ from core.utils.data_loader import get_dataloaders
 from core.models.forward_model import ForwardModel
 from core.models.generator import Generator
 from core.models.discriminator import Discriminator
-from core.utils.loss import PhysicsInformedLoss, gradient_penalty
+from core.utils.loss import PhysicsInformedLoss, gradient_penalty, r1_regularization, mode_seeking_loss
 
 def train_pigan():
     """Trains the PI-GAN model."""
@@ -53,14 +53,22 @@ def train_pigan():
     optimizer_G = optim.Adam(generator.parameters(), lr=config.G_LR, betas=(0.5, 0.9))
     optimizer_D = optim.Adam(discriminator.parameters(), lr=config.D_LR, betas=(0.5, 0.9))
 
-    # Loss functions
+    # Loss functions (PID weight will be annealed each epoch)
     pi_loss_G = PhysicsInformedLoss(forward_model=forward_model,
                                     lambda_physics=config.LAMBDA_PHYSICS,
                                     lambda_metric=config.LAMBDA_METRIC,
-                                    lambda_pid=config.LAMBDA_PID_FEEDBACK)
+                                    lambda_pid=config.LAMBDA_PID_FEEDBACK,
+                                    metrics_scaler=scalers['metrics'])
 
     # Training loop
     for epoch in range(config.GAN_EPOCHS):
+        # Anneal PID feedback weight linearly from initial to target over PID_FEEDBACK_ANNEAL_EPOCHS
+        if config.PID_FEEDBACK_ANNEAL_EPOCHS > 0:
+            t = min(1.0, (epoch + 1) / config.PID_FEEDBACK_ANNEAL_EPOCHS)
+            current_pid = config.LAMBDA_PID_FEEDBACK + t * (config.PID_FEEDBACK_TARGET - config.LAMBDA_PID_FEEDBACK)
+            pi_loss_G.lambda_pid = current_pid
+        else:
+            current_pid = pi_loss_G.lambda_pid
         progress_bar = tqdm(train_loader, desc=f"GAN Epoch {epoch+1}/{config.GAN_EPOCHS}", leave=False)
         for i, batch in enumerate(progress_bar):
             real_struct = batch['struct'].to(config.DEVICE)
@@ -93,6 +101,11 @@ def train_pigan():
                                   torch.cat([fake_struct, fake_spectra, fake_metrics], dim=1))
 
             D_loss = D_real_loss + D_fake_loss + config.LAMBDA_GP * gp
+
+            # Optional R1 regularization on real samples (set LAMBDA_R1>0 to enable)
+            if config.LAMBDA_R1 > 0.0:
+                r1 = r1_regularization(discriminator, torch.cat([real_struct, real_spectra, real_metrics], dim=1))
+                D_loss = D_loss + (config.LAMBDA_R1 * 0.5) * r1
             D_loss.backward()
             torch.nn.utils.clip_grad_norm_(discriminator.parameters(), max_norm=1.0) # Gradient clipping
             optimizer_D.step()
@@ -114,8 +127,17 @@ def train_pigan():
                 # Calculate generator loss using PhysicsInformedLoss
                 # Pass physical_error_feedback to pi_loss_G
                 G_loss, adv_loss, phys_loss, met_loss, pid_feedback_loss = pi_loss_G(
-                    fake_struct, real_spectra, real_metrics, D_fake_for_G_score, physical_error_feedback
+                    fake_struct, real_spectra, real_metrics, D_fake_for_G_score, physical_error_feedback,
+                    predicted_spectra=fake_spectra, predicted_metrics=fake_metrics
                 )
+                # Mode-seeking diversity loss: encourage diverse structures for different latents under same condition
+                if config.LAMBDA_MODE_SEEKING > 0.0:
+                    z2 = torch.randn(config.BATCH_SIZE, config.LATENT_DIM).to(config.DEVICE)
+                    fake_struct_2 = generator(z2, condition_for_G)
+                    ms_loss = mode_seeking_loss(fake_struct, fake_struct_2, z, z2)
+                    G_loss = G_loss + config.LAMBDA_MODE_SEEKING * ms_loss
+                else:
+                    ms_loss = torch.tensor(0.0, device=config.DEVICE)
                 G_loss.backward()
                 torch.nn.utils.clip_grad_norm_(generator.parameters(), max_norm=1.0) # Gradient clipping
                 optimizer_G.step()
@@ -123,14 +145,18 @@ def train_pigan():
                 progress_bar.set_postfix(
                     D_loss=D_loss.item(), G_loss=G_loss.item(),
                     Adv_L=adv_loss.item(), Phys_L=phys_loss.item(), Met_L=met_loss.item(),
-                    PID_L=pid_feedback_loss.item()
+                    PID_L=pid_feedback_loss.item(), PID_w=current_pid, MS_L=ms_loss.item()
                 )
             else:
-                progress_bar.set_postfix(D_loss=D_loss.item())
+                progress_bar.set_postfix(D_loss=D_loss.item(), PID_w=current_pid)
 
-        print(f"Epoch {epoch+1}: D_Loss: {D_loss.item():.4f}, G_Loss: {G_loss.item():.4f}, "
-              f"Adv_Loss: {adv_loss.item():.4f}, Phys_Loss: {phys_loss.item():.4f}, Met_Loss: {met_loss.item():.4f}, "
-              f"PID_Loss: {pid_feedback_loss.item():.4f}")
+        # Guard against epochs where G was not updated in the last iteration
+        try:
+            print(f"Epoch {epoch+1}: D_Loss: {D_loss.item():.4f}, G_Loss: {G_loss.item():.4f}, "
+                  f"Adv_Loss: {adv_loss.item():.4f}, Phys_Loss: {phys_loss.item():.4f}, Met_Loss: {met_loss.item():.4f}, "
+                  f"PID_Loss: {pid_feedback_loss.item():.4f}, PID_w: {current_pid:.4f}")
+        except UnboundLocalError:
+            print(f"Epoch {epoch+1}: D_Loss: {D_loss.item():.4f}, PID_w: {current_pid:.4f} (G not updated this epoch's last step)")
 
         # Save models periodically
         if (epoch + 1) % 50 == 0:

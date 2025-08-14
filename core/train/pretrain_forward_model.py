@@ -25,8 +25,8 @@ def pretrain_forward_model():
     os.makedirs(config.LOG_DIR, exist_ok=True) # Ensure log directory exists for console logs
     os.makedirs(config.PLOT_DIR, exist_ok=True) # Ensure plot directory exists for plots
 
-    # Get DataLoaders
-    train_loader, val_loader, _, _ = get_dataloaders(batch_size=config.BATCH_SIZE)
+    # Get DataLoaders and scalers (for metric normalization alignment)
+    train_loader, val_loader, _, scalers = get_dataloaders(batch_size=config.BATCH_SIZE)
 
     # Initialize model, optimizer, and loss function
     model = ForwardModel(
@@ -48,6 +48,10 @@ def pretrain_forward_model():
     train_losses = []
     val_losses = []
 
+    # Prepare scaler tensors for metrics normalization: scaled = x * scale + offset
+    metrics_scale = torch.tensor(scalers['metrics'].scale_, dtype=torch.float32).to(config.DEVICE)
+    metrics_offset = torch.tensor(scalers['metrics'].min_, dtype=torch.float32).to(config.DEVICE)
+
     for epoch in range(config.PRETRAIN_FWD_MODEL_EPOCHS):
         model.train()
         train_loss = 0.0
@@ -67,11 +71,12 @@ def pretrain_forward_model():
             # Calculate loss for spectra
             loss_spectra = spectra_criterion(predicted_spectra, target_spectra)
             
-            # Calculate loss for metrics
-            # Handle potential NaNs in target_metrics if they exist in dataset
+            # Calculate loss for metrics in the SAME normalized space as targets
+            # Normalize predicted metrics with train-fitted scaler: scaled = x * scale + offset
             predicted_metrics_cleaned = torch.nan_to_num(predicted_metrics, nan=0.0)
+            predicted_metrics_scaled = predicted_metrics_cleaned * metrics_scale + metrics_offset
             target_metrics_cleaned = torch.nan_to_num(target_metrics, nan=0.0)
-            loss_metrics = metrics_criterion(predicted_metrics_cleaned, target_metrics_cleaned)
+            loss_metrics = metrics_criterion(predicted_metrics_scaled, target_metrics_cleaned)
 
             # Combine losses (you can add weights here if needed, e.g., 0.5 * loss_spectra + 0.5 * loss_metrics)
             loss = loss_spectra + loss_metrics # Simple sum for now
@@ -99,8 +104,9 @@ def pretrain_forward_model():
                 
                 loss_spectra = spectra_criterion(predicted_spectra, target_spectra)
                 predicted_metrics_cleaned = torch.nan_to_num(predicted_metrics, nan=0.0)
+                predicted_metrics_scaled = predicted_metrics_cleaned * metrics_scale + metrics_offset
                 target_metrics_cleaned = torch.nan_to_num(target_metrics, nan=0.0)
-                loss_metrics = metrics_criterion(predicted_metrics_cleaned, target_metrics_cleaned)
+                loss_metrics = metrics_criterion(predicted_metrics_scaled, target_metrics_cleaned)
                 
                 loss = loss_spectra + loss_metrics
 

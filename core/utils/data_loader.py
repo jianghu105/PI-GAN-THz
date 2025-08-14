@@ -2,8 +2,9 @@
 
 import pandas as pd
 import torch
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
 import numpy as np
 import sys
 import os
@@ -28,39 +29,56 @@ class MetamaterialDataset(Dataset):
         }
 
 def get_dataloaders(batch_size=config.BATCH_SIZE):
-    """Loads data, preprocesses it, and returns PyTorch DataLoaders."""
+    """Loads data, splits into train/val/test, fits scalers on train only, and returns DataLoaders and scalers."""
     # Load the dataset
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
     dataset_full_path = os.path.join(project_root, config.DATASET_PATH)
     df = pd.read_csv(dataset_full_path)
 
-    # Separate features
+    # Separate raw features (no scaling yet)
     struct_params = df[config.STRUCT_PARAMS].values
     spectra = df[config.SPECTRA_PARAMS].values
     metrics = df[config.METRIC_PARAMS].values
 
-    # Normalize the data
-    scaler_struct = MinMaxScaler()
-    struct_params_scaled = scaler_struct.fit_transform(struct_params)
-
-    scaler_spectra = MinMaxScaler()
-    spectra_scaled = scaler_spectra.fit_transform(spectra)
-
-    scaler_metrics = MinMaxScaler()
-    metrics_scaled = scaler_metrics.fit_transform(metrics)
-
-    # Create the full dataset
-    dataset = MetamaterialDataset(struct_params_scaled, spectra_scaled, metrics_scaled)
-
-    # Split the dataset
-    test_size = int(len(dataset) * config.TEST_SPLIT)
-    val_size = int(len(dataset) * config.VAL_SPLIT)
-    train_size = len(dataset) - test_size - val_size
-
-    train_dataset, val_dataset, test_dataset = random_split(
-        dataset, [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(config.RANDOM_STATE)
+    # First split off test set
+    struct_trainval, struct_test, spectra_trainval, spectra_test, metrics_trainval, metrics_test = train_test_split(
+        struct_params, spectra, metrics,
+        test_size=config.TEST_SPLIT,
+        random_state=config.RANDOM_STATE,
+        shuffle=True
     )
+
+    # Then split train/val from trainval
+    val_relative = config.VAL_SPLIT / (1.0 - config.TEST_SPLIT) if (1.0 - config.TEST_SPLIT) > 0 else 0.0
+    struct_train, struct_val, spectra_train, spectra_val, metrics_train, metrics_val = train_test_split(
+        struct_trainval, spectra_trainval, metrics_trainval,
+        test_size=val_relative,
+        random_state=config.RANDOM_STATE,
+        shuffle=True
+    )
+
+    # Fit scalers on TRAIN ONLY
+    scaler_struct = MinMaxScaler().fit(struct_train)
+    scaler_spectra = MinMaxScaler().fit(spectra_train)
+    scaler_metrics = MinMaxScaler().fit(metrics_train)
+
+    # Transform each split
+    struct_train_scaled = scaler_struct.transform(struct_train)
+    struct_val_scaled = scaler_struct.transform(struct_val)
+    struct_test_scaled = scaler_struct.transform(struct_test)
+
+    spectra_train_scaled = scaler_spectra.transform(spectra_train)
+    spectra_val_scaled = scaler_spectra.transform(spectra_val)
+    spectra_test_scaled = scaler_spectra.transform(spectra_test)
+
+    metrics_train_scaled = scaler_metrics.transform(metrics_train)
+    metrics_val_scaled = scaler_metrics.transform(metrics_val)
+    metrics_test_scaled = scaler_metrics.transform(metrics_test)
+
+    # Create datasets per split
+    train_dataset = MetamaterialDataset(struct_train_scaled, spectra_train_scaled, metrics_train_scaled)
+    val_dataset = MetamaterialDataset(struct_val_scaled, spectra_val_scaled, metrics_val_scaled)
+    test_dataset = MetamaterialDataset(struct_test_scaled, spectra_test_scaled, metrics_test_scaled)
 
     # Create DataLoaders
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
