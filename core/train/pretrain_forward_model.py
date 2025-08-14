@@ -83,6 +83,7 @@ def pretrain_forward_model():
             loss = config.SPECTRA_LOSS_WEIGHT * loss_spectra + config.METRIC_LOSS_WEIGHT * loss_metrics
 
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # Gradient clipping
             optimizer.step()
 
             train_loss += loss.item()
