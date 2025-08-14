@@ -35,6 +35,7 @@ def pretrain_forward_model():
     ).to(config.DEVICE)
 
     optimizer = optim.Adam(model.parameters(), lr=config.PRETRAIN_FWD_MODEL_LR)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.5, verbose=True)
     
     # Use MSELoss for both spectra and metrics
     spectra_criterion = nn.MSELoss()
@@ -78,8 +79,8 @@ def pretrain_forward_model():
             target_metrics_cleaned = torch.nan_to_num(target_metrics, nan=0.0)
             loss_metrics = metrics_criterion(predicted_metrics_scaled, target_metrics_cleaned)
 
-            # Combine losses (you can add weights here if needed, e.g., 0.5 * loss_spectra + 0.5 * loss_metrics)
-            loss = loss_spectra + loss_metrics # Simple sum for now
+            # Combine losses with weights from config
+            loss = config.SPECTRA_LOSS_WEIGHT * loss_spectra + config.METRIC_LOSS_WEIGHT * loss_metrics
 
             loss.backward()
             optimizer.step()
@@ -109,7 +110,7 @@ def pretrain_forward_model():
                 target_metrics_cleaned = torch.nan_to_num(target_metrics, nan=0.0)
                 loss_metrics = metrics_criterion(predicted_metrics_scaled, target_metrics_cleaned)
                 
-                loss = loss_spectra + loss_metrics
+                loss = config.SPECTRA_LOSS_WEIGHT * loss_spectra + config.METRIC_LOSS_WEIGHT * loss_metrics
 
                 val_loss += loss.item()
                 val_spectra_loss += loss_spectra.item()
@@ -129,6 +130,9 @@ def pretrain_forward_model():
         # Store losses for plotting
         train_losses.append(avg_train_loss)
         val_losses.append(avg_val_loss)
+
+        # Step the scheduler
+        scheduler.step(avg_val_loss)
 
         # Early stopping and model saving based on total validation loss
         if avg_val_loss < best_val_loss:

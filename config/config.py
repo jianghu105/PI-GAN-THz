@@ -47,6 +47,8 @@ LR = 1e-4
 # Forward Model Pre-training
 PRETRAIN_FWD_MODEL_EPOCHS = 500
 PRETRAIN_FWD_MODEL_LR = 1e-3
+SPECTRA_LOSS_WEIGHT = 1.0  # Weight for spectra prediction loss
+METRIC_LOSS_WEIGHT = 0.5   # Weight for metric prediction loss
 
 # PI-GAN Training
 GAN_EPOCHS = 1000
