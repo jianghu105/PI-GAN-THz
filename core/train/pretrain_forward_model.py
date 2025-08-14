@@ -95,7 +95,8 @@ def pretrain_forward_model():
         val_spectra_loss = 0.0
         val_metrics_loss = 0.0
         with torch.no_grad():
-            for batch in val_loader:
+            val_bar = tqdm(val_loader, desc=f"Val {epoch+1}/{config.PRETRAIN_FWD_MODEL_EPOCHS}", leave=False)
+            for batch in val_bar:
                 struct_params = batch['struct'].to(config.DEVICE)
                 target_spectra = batch['spectra'].to(config.DEVICE)
                 target_metrics = batch['metrics'].to(config.DEVICE)

@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import os
 import sys
+from tqdm import tqdm
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
@@ -12,8 +13,8 @@ from core.utils.data_loader import get_dataloaders
 def evaluate_forward_model_standalone():
     print("Starting standalone forward model evaluation...")
 
-    # Load DataLoaders
-    _, _, test_loader, _ = get_dataloaders(batch_size=config.BATCH_SIZE)
+    # Load DataLoaders and scalers
+    _, _, test_loader, scalers = get_dataloaders(batch_size=config.BATCH_SIZE)
 
     # Initialize and load the Forward Model
     model = ForwardModel(
@@ -29,11 +30,15 @@ def evaluate_forward_model_standalone():
     model.eval() # Set to evaluation mode
     print(f"Forward model loaded from {model_path}")
 
-    # Loss criteria
+    # Loss criteria (sum over all samples, average later)
     spectra_mse_criterion = nn.MSELoss(reduction='sum')
     spectra_mae_criterion = nn.L1Loss(reduction='sum')
     metrics_mse_criterion = nn.MSELoss(reduction='sum')
     metrics_mae_criterion = nn.L1Loss(reduction='sum')
+
+    # Prepare scaler tensors for metrics normalization alignment
+    metrics_scale = torch.tensor(scalers['metrics'].scale_, dtype=torch.float32).to(config.DEVICE)
+    metrics_offset = torch.tensor(scalers['metrics'].min_, dtype=torch.float32).to(config.DEVICE)
 
     total_spectra_mse = 0.0
     total_spectra_mae = 0.0
@@ -42,7 +47,8 @@ def evaluate_forward_model_standalone():
     num_samples = 0
 
     with torch.no_grad():
-        for batch in test_loader:
+        progress_bar = tqdm(test_loader, desc="Evaluating Forward Model", leave=False)
+        for batch in progress_bar:
             struct_params = batch['struct'].to(config.DEVICE)
             target_spectra = batch['spectra'].to(config.DEVICE)
             target_metrics = batch['metrics'].to(config.DEVICE)
@@ -55,9 +61,11 @@ def evaluate_forward_model_standalone():
 
             # Metrics Loss (handle NaNs if any)
             predicted_metrics_cleaned = torch.nan_to_num(predicted_metrics, nan=0.0)
+            # Normalize predicted metrics to the same space as targets: scaled = x * scale + offset
+            predicted_metrics_scaled = predicted_metrics_cleaned * metrics_scale + metrics_offset
             target_metrics_cleaned = torch.nan_to_num(target_metrics, nan=0.0)
-            total_metrics_mse += metrics_mse_criterion(predicted_metrics_cleaned, target_metrics_cleaned).item()
-            total_metrics_mae += metrics_mae_criterion(predicted_metrics_cleaned, target_metrics_cleaned).item()
+            total_metrics_mse += metrics_mse_criterion(predicted_metrics_scaled, target_metrics_cleaned).item()
+            total_metrics_mae += metrics_mae_criterion(predicted_metrics_scaled, target_metrics_cleaned).item()
 
             num_samples += struct_params.shape[0]
 
