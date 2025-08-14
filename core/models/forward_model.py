@@ -96,24 +96,29 @@ class ForwardModel(nn.Module):
     and extracts metrics using a differentiable physics-inspired feature extractor."""
     def __init__(self, input_dim, output_dim):
         super().__init__()
+        self.output_dim = output_dim # Store output_dim for cropping
         # Main network (MLP for spectra prediction)
         self.spectra_network = nn.Sequential(
+            # Encoder MLP to latent vector
             nn.Linear(input_dim, 256),
-            nn.BatchNorm1d(256),
             nn.LeakyReLU(),
             nn.Linear(256, 512),
-            nn.BatchNorm1d(512),
             nn.LeakyReLU(),
-            nn.Linear(512, 1024),
-            nn.BatchNorm1d(1024),
+            nn.Linear(512, 1024), # Latent vector
             nn.LeakyReLU(),
-            nn.Linear(1024, 1024),
-            nn.BatchNorm1d(1024),
+        )
+        # Decoder CNN (ConvTranspose1d)
+        self.decoder_cnn = nn.Sequential(
+            nn.ConvTranspose1d(64, 32, kernel_size=4, stride=2, padding=1), # 16 -> 32
+            nn.BatchNorm1d(32),
             nn.LeakyReLU(),
-            nn.Linear(1024, 512),
-            nn.BatchNorm1d(512),
+            nn.ConvTranspose1d(32, 16, kernel_size=4, stride=2, padding=1), # 32 -> 64
+            nn.BatchNorm1d(16),
             nn.LeakyReLU(),
-            nn.Linear(512, output_dim)
+            nn.ConvTranspose1d(16, 8, kernel_size=4, stride=2, padding=1), # 64 -> 128
+            nn.BatchNorm1d(8),
+            nn.LeakyReLU(),
+            nn.ConvTranspose1d(8, 1, kernel_size=4, stride=2, padding=1), # 128 -> 256
         )
         
         # Differentiable physics-inspired feature extractor
@@ -125,7 +130,19 @@ class ForwardModel(nn.Module):
         self.calibrator = MetricsCalibrator(input_dim=12, output_dim=len(config.METRIC_PARAMS)).to(config.DEVICE)
 
     def forward(self, struct_params):
-        spectra_logits = self.spectra_network(struct_params)
+        # Encoder MLP
+        latent_vector = self.spectra_network(struct_params)
+
+        # Reshape for Decoder CNN
+        # Assuming latent_vector is (batch_size, 1024)
+        # Reshape to (batch_size, channels, initial_length) e.g., (batch_size, 64, 16)
+        latent_reshaped = latent_vector.view(-1, 64, 16)
+
+        # Decoder CNN
+        spectra_logits_256 = self.decoder_cnn(latent_reshaped)
+
+        # Crop to output_dim (250) and squeeze channel dim
+        spectra_logits = spectra_logits_256[:, :, :self.output_dim].squeeze(1)
         # Activation choice via config for stability control
         if getattr(config, 'SPECTRA_ACTIVATION', 'sigmoid') == 'tanh':
             predicted_spectra = 0.5 * (torch.tanh(spectra_logits) + 1.0)
