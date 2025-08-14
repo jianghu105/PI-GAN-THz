@@ -114,3 +114,13 @@ if __name__ == '__main__':
     print("\nExample of inverse-transformed structure parameters:")
     print(original_struct_sample[0])
 
+    # Add these lines to print statistics of scaled data
+    print("\n--- Scaled Data Statistics (Train Set) ---")
+    train_struct_data = torch.cat([batch['struct'] for batch in train_loader])
+    train_spectra_data = torch.cat([batch['spectra'] for batch in train_loader])
+    train_metrics_data = torch.cat([batch['metrics'] for batch in train_loader])
+
+    print(f"Scaled Struct - Min: {train_struct_data.min():.4f}, Max: {train_struct_data.max():.4f}, Mean: {train_struct_data.mean():.4f}, Std: {train_struct_data.std():.4f}")
+    print(f"Scaled Spectra - Min: {train_spectra_data.min():.4f}, Max: {train_spectra_data.max():.4f}, Mean: {train_spectra_data.mean():.4f}, Std: {train_spectra_data.std():.4f}")
+    print(f"Scaled Metrics - Min: {train_metrics_data.min():.4f}, Max: {train_metrics_data.max():.4f}, Mean: {train_metrics_data.mean():.4f}, Std: {train_metrics_data.std():.4f}")
+
