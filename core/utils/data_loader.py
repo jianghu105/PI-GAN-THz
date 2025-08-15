@@ -124,3 +124,7 @@ if __name__ == '__main__':
     print(f"Scaled Spectra - Min: {train_spectra_data.min():.4f}, Max: {train_spectra_data.max():.4f}, Mean: {train_spectra_data.mean():.4f}, Std: {train_spectra_data.std():.4f}")
     print(f"Scaled Metrics - Min: {train_metrics_data.min():.4f}, Max: {train_metrics_data.max():.4f}, Mean: {train_metrics_data.mean():.4f}, Std: {train_metrics_data.std():.4f}")
 
+    print("\nScaler Scale_ values (for original range calculation):")
+    print(f"Spectra Scale_: {scalers['spectra'].scale_}")
+    print(f"Metrics Scale_: {scalers['metrics'].scale_}")
+

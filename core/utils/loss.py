@@ -5,6 +5,22 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 from config import config
 
+class WeightedMSELoss(nn.Module):
+    def __init__(self, weights: torch.Tensor):
+        super().__init__()
+        # Ensure weights are on the same device as input during forward pass
+        self.register_buffer('weights', weights)
+        self.mse = nn.MSELoss(reduction='none') # Use reduction='none' to get element-wise MSE
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        # Calculate element-wise squared error
+        squared_error = self.mse(pred, target)
+        # Apply weights. Expand weights to match batch size if necessary.
+        # Weights should be (1, num_metrics) or (num_metrics,)
+        weighted_squared_error = squared_error * self.weights.to(pred.device)
+        # Return mean over all elements
+        return torch.mean(weighted_squared_error)
+
 class PhysicsInformedLoss(nn.Module):
     """Computes the physics-informed loss for the GAN.
 

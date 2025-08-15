@@ -37,21 +37,18 @@ def pretrain_forward_model():
     optimizer = optim.Adam(model.parameters(), lr=config.PRETRAIN_FWD_MODEL_LR)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.5, verbose=True)
     
-    # Use MSELoss for both spectra and metrics
+    from core.utils.loss import WeightedMSELoss
+# ...
+    # Use MSELoss for spectra, WeightedMSELoss for metrics
     spectra_criterion = nn.MSELoss()
-    metrics_criterion = nn.MSELoss()
-
-    best_val_loss = float('inf')
-    epochs_no_improve = 0
-    patience = 20  # Number of epochs to wait for improvement before stopping
-
-    # Lists to store loss history for plotting
-    train_losses = []
-    val_losses = []
-
     # Prepare scaler tensors for metrics normalization: scaled = x * scale + offset
     metrics_scale = torch.tensor(scalers['metrics'].scale_, dtype=torch.float32).to(config.DEVICE)
     metrics_offset = torch.tensor(scalers['metrics'].min_, dtype=torch.float32).to(config.DEVICE)
+
+    # Weights for WeightedMSELoss: inverse of scale_ to emphasize smaller original ranges
+    # Add a small epsilon to avoid division by zero if scale_ is ever zero (though unlikely for MinMaxScaler)
+    metric_loss_weights = 1.0 / (metrics_scale + 1e-8)
+    metrics_criterion = WeightedMSELoss(weights=metric_loss_weights)
 
     for epoch in range(config.PRETRAIN_FWD_MODEL_EPOCHS):
         model.train()
