@@ -36,7 +36,15 @@ def pretrain_forward_model():
 
     optimizer = optim.Adam(model.parameters(), lr=config.PRETRAIN_FWD_MODEL_LR)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, factor=0.5, verbose=True)
-    
+
+    best_val_loss = float('inf')
+    epochs_no_improve = 0
+    patience = 20  # Number of epochs to wait for improvement before stopping
+
+    # Lists to store loss history for plotting
+    train_losses = []
+    val_losses = []
+
     from core.utils.loss import WeightedMSELoss
 # ...
     # Use MSELoss for spectra, WeightedMSELoss for metrics
