@@ -21,25 +21,38 @@ class WeightedMSELoss(nn.Module):
         # Return mean over all elements
         return torch.mean(weighted_squared_error)
 
+class TotalVariationLoss(nn.Module):
+    def __init__(self):
+        super(TotalVariationLoss, self).__init__()
+
+    def forward(self, x):
+        """
+        Computes the Total Variation Loss for a 1D signal.
+        x: tensor of shape (batch_size, sequence_length)
+        """
+        return torch.mean(torch.abs(x[:, 1:] - x[:, :-1]))
+
 class PhysicsInformedLoss(nn.Module):
     """Computes the physics-informed loss for the GAN.
 
-    This loss consists of four parts:
+    This loss consists of five parts:
     1.  Adversarial Loss: How well the generator fools the discriminator.
-    2.  Physics Loss: MSE between predicted spectra and target spectra (both normalized to [0,1]).
+    2.  Physics Loss: MSE between predicted spectra and target spectra.
     3.  Metric Loss: MSE between normalized predicted metrics and target normalized metrics.
-        Predicted metrics are affinely normalized using the train-fitted MinMax scaler parameters.
-    4.  Physical Error Feedback Loss: Feedback from the discriminator's physical error head.
+    4.  Total Variation Loss: Penalizes high-frequency noise in the generated spectra.
+    5.  Physical Error Feedback Loss: Feedback from the discriminator's physical error head.
     """
     def __init__(self, forward_model, lambda_physics=config.LAMBDA_PHYSICS, 
-                 lambda_metric=config.LAMBDA_METRIC, lambda_pid=config.LAMBDA_PID_FEEDBACK,
-                 metrics_scaler=None):
+                 lambda_metric=config.LAMBDA_METRIC, lambda_tv=config.LAMBDA_TV,
+                 lambda_pid=config.LAMBDA_PID_FEEDBACK, metrics_scaler=None):
         super().__init__()
         self.forward_model = forward_model
         self.lambda_physics = lambda_physics
         self.lambda_metric = lambda_metric
+        self.lambda_tv = lambda_tv
         self.lambda_pid = lambda_pid
         self.mse_loss = nn.MSELoss()
+        self.tv_loss = TotalVariationLoss()
         # Extract affine params from sklearn MinMaxScaler: x_scaled = x * scale_ + min_
         if metrics_scaler is not None:
             # Register as buffers so they move with .to(device)
@@ -74,16 +87,20 @@ class PhysicsInformedLoss(nn.Module):
         else:
             metric_loss = torch.tensor(0.0, device=config.DEVICE)
 
-        # 4. Physical Error Feedback Loss
+        # 4. Total Variation Loss for smoothness
+        tv_loss = self.tv_loss(predicted_spectra)
+
+        # 5. Physical Error Feedback Loss
         pid_feedback_loss = self.lambda_pid * torch.mean(physical_error_feedback)
 
         # Total Generator Loss
         total_loss = adversarial_loss + \
                      self.lambda_physics * physics_loss + \
                      self.lambda_metric * metric_loss + \
+                     self.lambda_tv * tv_loss + \
                      pid_feedback_loss
 
-        return total_loss, adversarial_loss, physics_loss, metric_loss, pid_feedback_loss
+        return total_loss, adversarial_loss, physics_loss, metric_loss, pid_feedback_loss, tv_loss
 
 def mode_seeking_loss(g_output_a: torch.Tensor, g_output_b: torch.Tensor, z_a: torch.Tensor, z_b: torch.Tensor) -> torch.Tensor:
     """Mode-seeking regularization (MS-GAN): maximize ratio of output difference to latent difference.

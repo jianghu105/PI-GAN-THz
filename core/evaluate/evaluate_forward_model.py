@@ -1,92 +1,128 @@
 import torch
-import torch.nn as nn
+import numpy as np
 import os
 import sys
+import matplotlib.pyplot as plt
 from tqdm import tqdm
+from sklearn.metrics import r2_score
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from config import config
-from core.models.forward_model import ForwardModel
 from core.utils.data_loader import get_dataloaders
+from core.models.forward_model import ForwardModel
 
-def evaluate_forward_model_standalone():
-    print("Starting standalone forward model evaluation...")
+def evaluate_forward_model(n_examples=4):
+    """Evaluates the forward model on the test set for both spectra and metrics with visualization."""
+    print("--- Starting Forward Model Comprehensive Evaluation ---")
 
-    # Load DataLoaders and scalers
     _, _, test_loader, scalers = get_dataloaders(batch_size=config.BATCH_SIZE)
 
-    # Initialize and load the Forward Model
     model = ForwardModel(
         input_dim=len(config.STRUCT_PARAMS),
-        output_dim=len(config.SPECTRA_PARAMS)
+        output_dim=len(config.SPECTRA_PARAMS),
+        metrics_dim=len(config.METRIC_PARAMS)
     ).to(config.DEVICE)
 
     model_path = os.path.join(config.SAVED_MODELS_DIR, 'best_forward_model.pth')
     if not os.path.exists(model_path):
-        print(f"Error: Forward model not found at {model_path}. Please pre-train the forward model first.")
+        print(f"Error: Model not found at {model_path}")
         return
-    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
-    model.eval() # Set to evaluation mode
-    print(f"Forward model loaded from {model_path}")
 
-    # Loss criteria (sum over all samples, average later)
-    spectra_mse_criterion = nn.MSELoss(reduction='sum')
-    spectra_mae_criterion = nn.L1Loss(reduction='sum')
-    metrics_mse_criterion = nn.MSELoss(reduction='sum')
-    metrics_mae_criterion = nn.L1Loss(reduction='sum')
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
+    print(f"Forward model loaded from {model_path}\n")
 
-    # Prepare scaler tensors for metrics normalization alignment
-    metrics_scale = torch.tensor(scalers['metrics'].scale_, dtype=torch.float32).to(config.DEVICE)
-    metrics_offset = torch.tensor(scalers['metrics'].min_, dtype=torch.float32).to(config.DEVICE)
-
-    total_spectra_mse = 0.0
-    total_spectra_mae = 0.0
-    total_metrics_mse = 0.0
-    total_metrics_mae = 0.0
-    num_samples = 0
+    all_target_spectra = []
+    all_predicted_spectra = []
+    all_target_metrics = []
+    all_predicted_metrics = []
 
     with torch.no_grad():
-        progress_bar = tqdm(test_loader, desc="Evaluating Forward Model", leave=False)
-        for batch in progress_bar:
+        for batch in tqdm(test_loader, desc="Evaluating Forward Model"):
             struct_params = batch['struct'].to(config.DEVICE)
             target_spectra = batch['spectra'].to(config.DEVICE)
             target_metrics = batch['metrics'].to(config.DEVICE)
 
             predicted_spectra, predicted_metrics = model(struct_params)
 
-            # Spectra Loss
-            total_spectra_mse += spectra_mse_criterion(predicted_spectra, target_spectra).item()
-            total_spectra_mae += spectra_mae_criterion(predicted_spectra, target_spectra).item()
+            all_target_spectra.append(target_spectra.cpu().numpy())
+            all_predicted_spectra.append(predicted_spectra.cpu().numpy())
+            all_target_metrics.append(target_metrics.cpu().numpy())
+            all_predicted_metrics.append(predicted_metrics.cpu().numpy())
 
-            # Metrics Loss (handle NaNs if any)
-            predicted_metrics_cleaned = torch.nan_to_num(predicted_metrics, nan=0.0)
-            # Normalize predicted metrics to the same space as targets: scaled = x * scale + offset
-            predicted_metrics_scaled = predicted_metrics_cleaned * metrics_scale + metrics_offset
-            target_metrics_cleaned = torch.nan_to_num(target_metrics, nan=0.0)
-            total_metrics_mse += metrics_mse_criterion(predicted_metrics_scaled, target_metrics_cleaned).item()
-            total_metrics_mae += metrics_mae_criterion(predicted_metrics_scaled, target_metrics_cleaned).item()
+    # Concatenate all batches
+    all_target_spectra = np.concatenate(all_target_spectra, axis=0)
+    all_predicted_spectra = np.concatenate(all_predicted_spectra, axis=0)
+    all_target_metrics = np.concatenate(all_target_metrics, axis=0)
+    all_predicted_metrics = np.concatenate(all_predicted_metrics, axis=0)
 
-            num_samples += struct_params.shape[0]
+    # --- Calculate Metrics ---
+    # Spectra
+    spectra_mse = np.mean((all_target_spectra - all_predicted_spectra)**2)
+    spectra_mae = np.mean(np.abs(all_target_spectra - all_predicted_spectra))
+    spectra_r2 = r2_score(all_target_spectra, all_predicted_spectra)
 
-    avg_spectra_mse = total_spectra_mse / num_samples
-    avg_spectra_mae = total_spectra_mae / num_samples
-    avg_metrics_mse = total_metrics_mse / num_samples
-    avg_metrics_mae = total_metrics_mae / num_samples
+    # Metrics
+    metrics_mse = np.mean((all_target_metrics - all_predicted_metrics)**2)
+    metrics_mae = np.mean(np.abs(all_target_metrics - all_predicted_metrics))
+    metrics_r2 = r2_score(all_target_metrics, all_predicted_metrics)
 
     print("\n--- Forward Model Performance on Test Set ---")
-    print(f"Spectra Prediction MSE: {avg_spectra_mse:.6f}")
-    print(f"Spectra Prediction MAE: {avg_spectra_mae:.6f}")
-    print(f"Metrics Prediction MSE: {avg_metrics_mse:.6f}")
-    print(f"Metrics Prediction MAE: {avg_metrics_mae:.6f}")
+    print("\n[Spectra Prediction]")
+    print(f"  - MSE: {spectra_mse:.6f}")
+    print(f"  - MAE: {spectra_mae:.6f}")
+    print(f"  - R² Score: {spectra_r2:.4f}")
+    
+    print("\n[Metrics Prediction]")
+    print(f"  - MSE: {metrics_mse:.6f}")
+    print(f"  - MAE: {metrics_mae:.6f}")
+    print(f"  - R² Score: {metrics_r2:.4f}")
 
-    print("\n--- Performance Targets ---")
-    print(f"Spectra Target MSE: < 0.045")
-    print(f"Spectra Target MAE: < 2.0")
-    print(f"Metrics Target MSE: < 0.01")
-    print(f"Metrics Target MAE: < 0.1")
+    # --- Visualization ---
+    # Inverse transform for plotting
+    plot_target_spectra = scalers['spectra'].inverse_transform(all_target_spectra[:n_examples])
+    plot_predicted_spectra = scalers['spectra'].inverse_transform(all_predicted_spectra[:n_examples])
+    plot_target_metrics = scalers['metrics'].inverse_transform(all_target_metrics)
+    plot_predicted_metrics = scalers['metrics'].inverse_transform(all_predicted_metrics)
 
-    print("Standalone forward model evaluation complete.")
+    freq_axis = np.array([float(col.split('_')[1]) for col in config.SPECTRA_PARAMS])
+
+    fig = plt.figure(figsize=(20, 10 + 4 * int(np.ceil(len(config.METRIC_PARAMS)/4))))
+    gs = fig.add_gridspec(2 + int(np.ceil(len(config.METRIC_PARAMS)/4)), 4)
+    fig.suptitle('Forward Model Evaluation', fontsize=20)
+
+    # Spectra Plots
+    for i in range(n_examples):
+        ax = fig.add_subplot(gs[0, i])
+        ax.plot(freq_axis, plot_target_spectra[i], 'b-', label='Real')
+        ax.plot(freq_axis, plot_predicted_spectra[i], 'r--', label='Predicted')
+        ax.set_title(f'Sample Spectrum {i+1}')
+        ax.grid(True, linestyle='--')
+        ax.legend()
+
+    # Metrics Scatter Plots
+    for i, metric in enumerate(config.METRIC_PARAMS):
+        row = 1 + i // 4
+        col = i % 4
+        ax = fig.add_subplot(gs[row, col])
+        ax.scatter(plot_target_metrics[:, i], plot_predicted_metrics[:, i], alpha=0.5, s=10)
+        lims = [
+            np.min([ax.get_xlim(), ax.get_ylim()]),
+            np.max([ax.get_xlim(), ax.get_ylim()]),
+        ]
+        ax.plot(lims, lims, 'r--', alpha=0.75, zorder=0)
+        ax.set_xlabel("Real Values")
+        ax.set_ylabel("Predicted Values")
+        ax.set_title(f'Metric: {metric}')
+        ax.grid(True, linestyle='--')
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    plot_path = os.path.join(config.PLOT_DIR, 'forward_model_evaluation.png')
+    plt.savefig(plot_path)
+    plt.close()
+    print(f"\nVisualization plot saved to {plot_path}")
+    print("\nEvaluation complete.")
 
 if __name__ == '__main__':
-    evaluate_forward_model_standalone()
+    evaluate_forward_model()
